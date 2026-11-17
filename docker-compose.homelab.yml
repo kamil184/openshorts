@@ -4,8 +4,8 @@
 services:
   backend:
     ports: !reset []
-    mem_limit: 7g
-    memswap_limit: 8g
+    mem_limit: 6g
+    memswap_limit: 6g
     cpus: 6.0
     logging: &logging
       driver: json-file
@@ -16,10 +16,10 @@ services:
   frontend:
     ports: !override
       - "127.0.0.1:5175:5173"
-    mem_limit: 1g
+    mem_limit: 512m
     logging: *logging
 
   renderer:
     ports: !reset []
-    mem_limit: 2g
+    mem_limit: 1536m
     logging: *logging
