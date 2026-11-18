@@ -1758,7 +1758,7 @@ CAPTION_STYLE_FIELDS = (
     "style", "position", "font_size", "font_name", "font_color",
     "border_color", "border_width", "bg_color", "bg_opacity",
     "highlight_color", "effect", "base_opacity", "uppercase", "reveal",
-    "shadow", "max_chars", "max_duration")
+    "shadow", "blur", "max_chars", "max_duration")
 
 
 def _words_transcript(words, language="en"):
@@ -1796,7 +1796,7 @@ def _burn_caption_style(video_path, out_path, sub_path, transcript, start, end,
             highlight_color=s["highlight_color"], bg_color=s["bg_color"],
             bg_opacity=s["bg_opacity"], effect=s["effect"],
             base_opacity=s["base_opacity"], uppercase=s["uppercase"],
-            reveal=s["reveal"], shadow=s["shadow"])
+            reveal=s["reveal"], shadow=s["shadow"], blur=s["blur"])
         if max_chars is not None:
             opts["max_chars"] = max_chars
         if max_duration is not None:
@@ -6979,7 +6979,7 @@ class SubtitleRequest(BaseModel):
     font_name: str = "Verdana"
     font_color: str = "#FFFFFF"
     border_color: str = "#000000"
-    border_width: int = 2
+    border_width: float = 2
     bg_color: str = "#000000"
     bg_opacity: float = 0.0
     style: str = "classic"  # classic (uniform color) or karaoke (word highlight)
@@ -6988,7 +6988,8 @@ class SubtitleRequest(BaseModel):
     base_opacity: float = 1.0  # opacity of non-active words (dimmed modern look)
     uppercase: bool = False
     reveal: bool = False  # karaoke: words appear as they are spoken
-    shadow: int = 0  # karaoke: drop shadow depth, 0-6
+    shadow: float = 0  # karaoke: drop shadow depth, 0-6
+    blur: float = 0.0  # karaoke: edge blur in PlayRes units
     # Words per line, as a character budget (1 = one word at a time). None
     # keeps the generator's defaults, which is what old clients send.
     max_chars: Optional[int] = None
@@ -7565,7 +7566,7 @@ async def _set_clip_mode_locked(req: ClipModeRequest, request: Request, job):
                 None, lambda: pro_mode.convert(
                     base_path, clean_name, clip, data.get('transcript') or {},
                     wait=PRO_WAIT_SECONDS, api_key=api_key, hook_seconds=hook_seconds,
-                    caption_style=CAPTION_PRESETS["cine"] if had_captions else None))
+                    caption_style=CAPTION_PRESETS["talking"] if had_captions else None))
         except Exception as e:
             if reservation_id:
                 await _metering.release_reservation(reservation_id)
@@ -8329,7 +8330,7 @@ async def add_subtitles(req: SubtitleRequest, request: Request):
         border_width=req.border_width, highlight_color=req.highlight_color,
         bg_color=req.bg_color, bg_opacity=req.bg_opacity,
         effect=req.effect, base_opacity=req.base_opacity, uppercase=req.uppercase,
-        reveal=req.reveal, shadow=req.shadow,
+        reveal=req.reveal, shadow=req.shadow, blur=req.blur,
     )
     if req.max_chars is not None:
         karaoke_opts["max_chars"] = max(1, min(40, int(req.max_chars)))

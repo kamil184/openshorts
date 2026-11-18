@@ -6,6 +6,7 @@ import Modal from './ui/Modal';
 import SegmentedControl from './ui/SegmentedControl';
 
 const FONT_OPTIONS = [
+    { value: 'Poppins ExtraBold', label: 'Poppins' },
     { value: 'Anton', label: 'Anton' },
     { value: 'Montserrat ExtraBold', label: 'Montserrat' },
     { value: 'Verdana', label: 'Verdana' },
@@ -49,10 +50,11 @@ const ANIMATION_OPTIONS = [
 const ANIMATION_TO_EFFECT = { pop: 'pop', 'word-highlight': 'glow', karaoke: 'highlight', none: 'none' };
 const EFFECT_TO_ANIMATION = { pop: 'pop', glow: 'word-highlight', highlight: 'karaoke', box: 'karaoke', none: 'none' };
 
-// Font size in the units /api/subtitle takes. S is what every clip ships
-// with (subtitles.AUTO_CAPTION_STYLE font_size 40), so opening the modal and
+// Font size in the units /api/subtitle takes. XS is what every clip ships
+// with (subtitles.AUTO_CAPTION_STYLE font_size 22), so opening the modal and
 // applying never resizes the captions.
 const SIZE_OPTIONS = [
+    { value: 22, label: 'XS' },
     { value: 40, label: 'S' },
     { value: 44, label: 'M' },
     { value: 56, label: 'L' },
@@ -60,9 +62,9 @@ const SIZE_OPTIONS = [
 ];
 
 // Characters per line at size 44 (M), per font: Anton is condensed, Montserrat
-// wide. Bigger text gets proportionally fewer. The server also measures the
-// real width (subtitles.line_fitter), so a block is always one line.
-const LINE_CHARS = { Anton: 16, 'Montserrat ExtraBold': 9, Impact: 16 };
+// / Poppins wide. Bigger text gets proportionally fewer. The server also measures
+// the real width (subtitles.line_fitter), so a block is always one line.
+const LINE_CHARS = { Anton: 16, 'Montserrat ExtraBold': 9, 'Poppins ExtraBold': 11, Impact: 16 };
 const lineBudget = (fontName, fontSize, oneWord) =>
     oneWord ? 1 : Math.max(6, Math.round((LINE_CHARS[fontName] || 14) * 44 / fontSize));
 
@@ -80,7 +82,11 @@ const POSITION_OPTIONS = [
 // dimmed base text + strong active word, optional glow/pop/box effect.
 const CAPTION_PRESETS = [
     // What every clip ships with (subtitles.AUTO_CAPTION_STYLE).
-    { id: 'default', label: 'Default',  style: 'karaoke', effect: 'pop',       highlightColor: '#FFE500', baseOpacity: 1.0, uppercase: true,  fontName: 'Anton', borderWidth: 2, fontSize: 40 },
+    { id: 'default', label: 'Default',  style: 'karaoke', effect: 'none',      highlightColor: '#FFE500', baseOpacity: 1.0, uppercase: false, fontName: 'Poppins ExtraBold', borderWidth: 0.7, shadow: 0.8, blur: 0.8, fontSize: 22 },
+    // Talking-head look used by Pro mode.
+    { id: 'talking', label: 'Talking',  style: 'karaoke', effect: 'none',      highlightColor: '#FF5A1F', baseOpacity: 0.6, uppercase: false, fontName: 'Montserrat ExtraBold', borderWidth: 0, shadow: 1.0, blur: 1.4, fontSize: 20 },
+    // Previous auto-caption look (Anton uppercase + yellow pop).
+    { id: 'classic', label: 'Classic',  style: 'karaoke', effect: 'pop',       highlightColor: '#FFE500', baseOpacity: 1.0, uppercase: true,  fontName: 'Anton', borderWidth: 2, fontSize: 40 },
     // Trending short-form looks (2026): word-by-word build-up, a box behind
     // the active word, one big word at a time, and the clean shadow-only look.
     { id: 'hormozi', label: 'Hormozi',  style: 'karaoke', effect: 'pop',       highlightColor: '#FFE500', baseOpacity: 1.0, uppercase: true,  fontName: 'Montserrat ExtraBold', borderWidth: 4, shadow: 2, reveal: true, fontSize: 44 },
@@ -99,7 +105,7 @@ const CAPTION_PRESETS = [
     { id: 'minimal', label: 'Minimal',    style: 'karaoke', effect: 'none', highlightColor: '#FFFFFF', baseOpacity: 0.65, uppercase: false, fontName: 'Verdana', borderWidth: 1 },
     { id: 'beast',   label: 'Beast',      style: 'karaoke', effect: 'pop',  highlightColor: '#FFD700', baseOpacity: 1.0,  uppercase: true,  fontName: 'Impact',  borderWidth: 3 },
     { id: 'boxed',   label: 'Boxed',      style: 'karaoke', effect: 'box',  highlightColor: '#7C3AED', baseOpacity: 0.85, uppercase: false, fontName: 'Verdana', borderWidth: 2 },
-    { id: 'classic', label: 'Classic',    style: 'classic', effect: 'none', highlightColor: '#FFD700', baseOpacity: 1.0,  uppercase: false, fontName: 'Verdana', borderWidth: 2 },
+    { id: 'plain',   label: 'Plain SRT',  style: 'classic', effect: 'none', highlightColor: '#FFD700', baseOpacity: 1.0,  uppercase: false, fontName: 'Verdana', borderWidth: 2 },
 ];
 
 // Mirrors subtitles._luminance (Rec. 601).
@@ -119,24 +125,25 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
     // Opens on the look the clip already has (the Default preset), so
     // "apply" without touching anything changes nothing.
     const [position, setPosition] = useState('bottom');
-    const [fontSize, setFontSize] = useState(40);
-    const [fontName, setFontName] = useState('Anton');
+    const [fontSize, setFontSize] = useState(22);
+    const [fontName, setFontName] = useState('Poppins ExtraBold');
     const [fontColor, setFontColor] = useState('#FFFFFF');
     const [highlightColor, setHighlightColor] = useState('#FFE500');
     const [borderColor, setBorderColor] = useState('#000000');
-    const [borderWidth, setBorderWidth] = useState(2);
+    const [borderWidth, setBorderWidth] = useState(0.7);
     const [bgColor, setBgColor] = useState('#000000');
     const [bgOpacity, setBgOpacity] = useState(0.0);
-    const [animation, setAnimationState] = useState('pop');
+    const [animation, setAnimationState] = useState('none');
     const [showTextEditor, setShowTextEditor] = useState(false);
 
     // Karaoke (server-side ASS burn) state
     const [style, setStyle] = useState('karaoke'); // classic | karaoke
-    const [effect, setEffect] = useState('pop'); // none | glow | pop | box | highlight
+    const [effect, setEffect] = useState('none'); // none | glow | pop | box | highlight
     const [baseOpacity, setBaseOpacity] = useState(1.0);
-    const [uppercase, setUppercase] = useState(true);
+    const [uppercase, setUppercase] = useState(false);
     const [reveal, setReveal] = useState(false);
-    const [shadow, setShadow] = useState(0);
+    const [shadow, setShadow] = useState(0.8);
+    const [blur, setBlur] = useState(0.8);
     const [oneWord, setOneWord] = useState(false);
     const [activePreset, setActivePreset] = useState('default');
 
@@ -158,6 +165,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
         setBgOpacity(0);
         setReveal(!!p.reveal);
         setShadow(p.shadow || 0);
+        setBlur(p.blur || 0);
         setOneWord(!!p.oneWord);
         if (p.fontSize) setFontSize(p.fontSize);
         setAnimationState(p.style === 'karaoke' ? (EFFECT_TO_ANIMATION[p.effect] || 'none') : 'none');
@@ -165,7 +173,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
 
     const maxChars = lineBudget(fontName, fontSize, oneWord);
     // Same block duration as the auto captions (AUTO_CAPTION_STYLE).
-    const maxDuration = 1.4;
+    const maxDuration = 1.5;
 
     // Remotion preview state
     const [captions, setCaptions] = useState([]);
@@ -376,6 +384,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 options={SIZE_OPTIONS}
                                 value={fontSize}
                                 onChange={setFontSize}
+                                columns={5}
                                 size="sm"
                             />
                         </div>
@@ -500,8 +509,9 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                         type="range"
                                         min="0"
                                         max="5"
+                                        step="0.1"
                                         value={borderWidth}
-                                        onChange={(e) => setBorderWidth(parseInt(e.target.value))}
+                                        onChange={(e) => setBorderWidth(parseFloat(e.target.value))}
                                         className="w-full accent-[var(--color-accent)]"
                                     />
                                     <div className="flex justify-between">
@@ -559,7 +569,7 @@ export default function SubtitleModal({ isOpen, onClose, onGenerate, onApplyAll,
                                 position, fontSize, fontName, fontColor, borderColor, borderWidth, bgColor, bgOpacity,
                                 // Karaoke burn (server-side ASS render)
                                 style, effect, baseOpacity, uppercase, highlightColor,
-                                reveal: !oneWord && reveal, shadow, maxChars, maxDuration,
+                                reveal: !oneWord && reveal, shadow, blur, maxChars, maxDuration,
                                 // Remotion data
                                 remotion: useRemotionPreview ? subtitleConfig : null,
                                 captions: textEdited ? captions : null,

@@ -15,7 +15,7 @@ def test_dashboard_offers_every_server_preset():
 def test_default_preset_is_what_clips_ship_with():
     d = CAPTION_PRESETS["default"]
     for k in ("font_name", "font_size", "highlight_color", "border_width",
-              "effect", "uppercase", "max_chars", "max_duration"):
+              "shadow", "blur", "effect", "uppercase", "max_chars", "max_duration"):
         assert d[k] == AUTO_CAPTION_STYLE[k], k
 
 
@@ -58,7 +58,7 @@ def test_mcp_forwards_preset_and_new_options():
 
 def test_mcp_one_word_and_resize_set_the_line_budget():
     assert _call(one_word=True)["max_chars"] == 1
-    assert _call(font_size=70)["max_chars"] == line_budget("Anton", 70)
+    assert _call(font_size=70)["max_chars"] == line_budget(CAPTION_PRESETS["default"]["font_name"], 70)
     # Resizing the one-word preset keeps it one word.
     assert "max_chars" not in _call(preset="oneword", font_size=56)
 
@@ -96,7 +96,10 @@ def _default_ass(tmp_path, text, **over):
     assert generate_ass(_words(text), 0, 60, str(out), max_chars=st["max_chars"],
                         max_duration=st["max_duration"], fontsize=st["font_size"],
                         font_name=st["font_name"], border_width=st["border_width"],
-                        effect=st["effect"], uppercase=st["uppercase"])
+                        effect=st["effect"], uppercase=st["uppercase"],
+                        shadow=st.get("shadow", 0), blur=st.get("blur", 0.0),
+                        base_opacity=st.get("base_opacity", 1.0),
+                        highlight_color=st.get("highlight_color", "#FFE500"))
     return out.read_text(encoding="utf-8-sig")
 
 
@@ -111,9 +114,9 @@ def test_a_block_never_needs_a_second_line(tmp_path):
     # Inside the character budget yet wider than the frame in Anton
     # capitals: this is the block that used to jump to two lines.
     text = "immortality, which is a mmmm wwww mmmm wwww il it is at if in"
-    ass = _default_ass(tmp_path, text)
+    ass = _default_ass(tmp_path, text, **CAPTION_PRESETS["classic"])
     assert "WrapStyle: 2" in ass
-    size = int(AUTO_CAPTION_STYLE["font_size"] * 0.85)
+    size = int(CAPTION_PRESETS["classic"]["font_size"] * 0.85)
     shown = set(_lines(ass))
     assert "IMMORTALITY, WHICH IS A" not in shown
     for line in shown:
@@ -123,7 +126,7 @@ def test_a_block_never_needs_a_second_line(tmp_path):
 
 def test_a_lone_word_wider_than_the_frame_is_narrowed(tmp_path):
     ass = _default_ass(tmp_path, "ok " + "w" * 30 + " ok")
-    event = next(ln for ln in ass.splitlines() if "W" * 30 in ln)
+    event = next(ln for ln in ass.splitlines() if "w" * 30 in ln)
     assert re.search(r"\\fscx(\d+)", event) and int(re.search(r"\\fscx(\d+)", event).group(1)) < 100
 
 
@@ -131,3 +134,63 @@ def test_an_unmeasured_font_keeps_the_old_wrapping(tmp_path):
     from subtitles import line_fitter
     assert line_fitter("Some Font Nobody Ships", 27) is None
     assert "WrapStyle: 0" in _default_ass(tmp_path, "one two three four", font_name="Verdana")
+
+
+def test_default_and_talking_presets_have_no_box_and_no_width_jitter(tmp_path):
+    ass_def = _default_ass(tmp_path, "I somehow bought four bows")
+    style_def = next(l for l in ass_def.splitlines() if l.startswith("Style: Default"))
+    fields_def = style_def.split(",")
+    assert fields_def[1] == "Poppins ExtraBold"
+    assert fields_def[15] == "1"  # BorderStyle=1 (no background box)
+    assert fields_def[16] == "0.7"
+    assert fields_def[17] == "0.8"
+    events_def = [l for l in ass_def.splitlines() if l.startswith("Dialogue:")]
+    assert "\\blur0.8" in events_def[0]
+    assert "\\c&H00E5FF&" in events_def[0]
+    assert "\\fscx" not in "".join(events_def)  # no width jitter
+    assert "I somehow" in ass_def  # sentence case preserved
+
+    ass_talk = _default_ass(tmp_path, "wait I bought four bows", **CAPTION_PRESETS["talking"])
+    style_talk = next(l for l in ass_talk.splitlines() if l.startswith("Style: Default"))
+    fields_talk = style_talk.split(",")
+    assert fields_talk[1] == "Montserrat ExtraBold"
+    assert fields_talk[15] == "1"  # BorderStyle=1 (no box)
+    assert fields_talk[16] == "0"  # no outline
+    assert float(fields_talk[17]) > 0  # soft drop shadow
+    assert "\\blur1.4" in ass_talk
+    assert "\\c&H1F5AFF&" in ass_talk
+
+    # Old default preserved as 'classic' and 'cine' kept intact
+    assert CAPTION_PRESETS["classic"]["font_name"] == "Anton"
+    assert CAPTION_PRESETS["classic"]["uppercase"] is True
+    assert CAPTION_PRESETS["cine"]["font_size"] == 36
+
+
+def test_cyrillic_falls_back_to_montserrat_and_strips_emoji_in_ass(tmp_path):
+    from subtitles import generate_ass
+
+    st = AUTO_CAPTION_STYLE
+    for lang, sample in (("ru", "привет мир это тест"), ("uk", "привіт світ це тест")):
+        out = tmp_path / f"{lang}.ass"
+        tr = {"language": lang, "segments": [{"words": [
+            {"word": " " + w, "start": i * 0.4, "end": i * 0.4 + 0.35}
+            for i, w in enumerate((sample + " 🔥").split())
+        ]}]}
+        assert generate_ass(
+            tr, 0, 10, str(out), fontsize=st["font_size"], font_name=st["font_name"],
+            border_width=st["border_width"], shadow=st["shadow"], blur=st["blur"],
+            effect=st["effect"], uppercase=st["uppercase"],
+        ) is True
+        content = out.read_text(encoding="utf-8-sig")
+        style_line = next(l for l in content.splitlines() if l.startswith("Style: Default"))
+        assert ",Montserrat ExtraBold," in style_line
+        assert "🔥" not in content
+
+    # Untitled/wrong-lang transcript with Cyrillic characters still switches font.
+    out_unk = tmp_path / "unk.ass"
+    tr_unk = {"language": "en", "segments": [{"words": [
+        {"word": " Кириллица", "start": 0.0, "end": 0.5},
+    ]}]}
+    assert generate_ass(tr_unk, 0, 10, str(out_unk), fontsize=st["font_size"],
+                        font_name=st["font_name"]) is True
+    assert ",Montserrat ExtraBold," in out_unk.read_text(encoding="utf-8-sig")

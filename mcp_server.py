@@ -238,7 +238,9 @@ TOOLS = [
                 "clip_index": {"type": "integer", "description": "0-based index from list_clips."},
                 "preset": {"type": "string", "enum": list(CAPTION_PRESETS),
                            "description": (
-                               "default: Anton caps, yellow active word. "
+                               "default: Poppins ExtraBold sentence case, thin outline, yellow active word. "
+                               "classic: Anton caps, yellow active word. "
+                               "talking: no outline, dimmed inactive words, orange active word. "
                                "hormozi: words appear as spoken, yellow active word. "
                                "pill: purple box behind the active word. "
                                "lime: lime box behind the active word. "
@@ -247,17 +249,17 @@ TOOLS = [
                 "style": {"type": "string", "enum": ["classic", "karaoke"]},
                 "position": {"type": "string", "enum": ["top", "middle", "bottom"]},
                 "font_size": {"type": "integer",
-                              "description": "40 is the default (S); 44 = M, 56 = L, 70 = XL."},
+                              "description": "22 is the default; 40 = S, 44 = M, 56 = L, 70 = XL."},
                 "font_name": {"type": "string",
-                              "description": "Anton, Montserrat ExtraBold, Verdana, Arial, Impact, Georgia..."},
+                              "description": "Poppins ExtraBold, Anton, Montserrat ExtraBold, Verdana, Arial, Impact, Georgia..."},
                 "font_color": {"type": "string", "description": "Hex color, e.g. #FFFFFF."},
                 "highlight_color": {"type": "string", "description": "Karaoke active-word color (or box color with effect 'highlight')."},
                 "effect": {"type": "string", "enum": ["none", "pop", "glow", "box", "highlight"],
                            "description": "Karaoke active-word effect; 'highlight' = solid box behind it."},
                 "reveal": {"type": "boolean", "description": "Karaoke: words appear as they are spoken."},
                 "one_word": {"type": "boolean", "description": "Show one word at a time."},
-                "shadow": {"type": "integer", "description": "Drop shadow depth 0-6."},
-                "border_width": {"type": "integer", "description": "Outline 0-10 (0 needs a shadow to stay readable)."},
+                "shadow": {"type": "number", "description": "Drop shadow depth 0-6."},
+                "border_width": {"type": "number", "description": "Outline 0-10 (0 needs a shadow to stay readable)."},
                 "uppercase": {"type": "boolean"},
             },
             "required": ["job_id", "clip_index"],

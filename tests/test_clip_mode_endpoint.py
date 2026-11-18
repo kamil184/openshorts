@@ -210,7 +210,7 @@ class TestLayersGoBackOn:
     def test_pro_mode_brings_its_caption_style_and_takes_it_back(self, layered_job, fake_render):
         _switch("pro")
         clip = _clip(layered_job["meta_path"])
-        assert clip["caption_style"] == app_module.CAPTION_PRESETS["cine"]
+        assert clip["caption_style"] == app_module.CAPTION_PRESETS["talking"]
         _switch("normal")
         assert not _clip(layered_job["meta_path"]).get("caption_style")
 

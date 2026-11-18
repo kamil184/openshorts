@@ -110,8 +110,24 @@ def _escape_ffmpeg_filter_value(value):
     return escape_filter_value(value)
 
 
-def _normalize_subtitle_word(value):
-    return " ".join(str(value or "").split())
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "\U00002B00-\U00002BFF"
+    "\U0000FE0E\U0000FE0F"
+    "\U0000200D"
+    "\U000020E3"
+    "]+"
+)
+
+
+def _normalize_subtitle_word(value, strip_emoji=False):
+    text = str(value or "")
+    if strip_emoji:
+        text = _EMOJI_RE.sub("", text)
+    return " ".join(text.split())
 
 
 def transcribe_audio(video_path):
@@ -150,7 +166,7 @@ def generate_srt_from_video(video_path, output_path, max_chars=20, max_duration=
 
 
 def _collect_word_blocks(transcript, clip_start, clip_end, max_chars=20, max_duration=2.0,
-                         fits=None):
+                         fits=None, strip_emoji=False):
     """
     Flatten transcript words for a clip range and group them into short blocks
     suitable for vertical video. Returns a list of blocks; each block is a list
@@ -172,7 +188,7 @@ def _collect_word_blocks(transcript, clip_start, clip_end, max_chars=20, max_dur
     words = []
     for word_info in flat_words:
         if word_info.get('end', 0) > clip_start and word_info.get('start', 0) < clip_end:
-            cleaned_word = _normalize_subtitle_word(word_info.get('word', ''))
+            cleaned_word = _normalize_subtitle_word(word_info.get('word', ''), strip_emoji=strip_emoji)
             if not cleaned_word:
                 continue
             words.append({
@@ -237,43 +253,50 @@ def generate_srt(transcript, clip_start, clip_end, output_path, max_chars=20, ma
 SAFE_MARGIN_V = 43
 
 
-# The caption look applied automatically to every generated clip. Chosen by
-# rendering four candidates on a real clip and comparing them (25-jul-2026):
-# white Anton uppercase with a yellow active word, black outline, gentle pop.
-# Yellow because it is the one colour that almost never occurs in footage, so
-# the active word reads instantly on any background; the base text stays fully
-# opaque (dimming it tested worse over bright scenes). Size and outline came
-# down from 44 / 4 to 40 / 2 (17-nov-2026): at 44 a line held one or two words
-# and the outline ate the letter shapes. This is a starting point, not a cage:
-# the subtitle modal still overrides every field.
+# The caption look applied automatically to every generated clip: crisp
+# Poppins ExtraBold sentence case, thin dark outline + soft blurred shadow,
+# yellow active word (#FFE500), color-only highlight (no width jitter).
 AUTO_CAPTION_STYLE = {
     "style": "karaoke",
     "alignment": "bottom",
-    "font_name": "Anton",
-    "font_size": 40,
+    "font_name": "Poppins ExtraBold",
+    "font_size": 22,
     "font_color": "#FFFFFF",
     "highlight_color": "#FFE500",
     "border_color": "#000000",
-    "border_width": 2,
-    "effect": "pop",
+    "border_width": 0.7,
+    "effect": "none",
     "base_opacity": 1.0,
-    "uppercase": True,
-    "max_chars": 18,
-    "max_duration": 1.4,
+    "uppercase": False,
+    "shadow": 0.8,
+    "blur": 0.8,
+    "max_chars": 24,
+    "max_duration": 1.5,
 }
 
 
 # Named looks for /api/subtitle `preset` (and the MCP add_subtitles tool), in
 # request-field names. Mirrors the dashboard's CAPTION_PRESETS in
 # SubtitleModal.jsx (a test checks the ids): "default" is what every clip
-# ships with, the rest are the short-form looks trending in 2026.
+# ships with, the rest are named short-form looks.
 _PRESET_BASE = {"style": "karaoke", "font_color": "#FFFFFF", "bg_opacity": 0.0,
                 "base_opacity": 1.0, "reveal": False, "shadow": 0,
-                "max_duration": 1.4}
+                "blur": 0.0, "max_duration": 1.4}
 CAPTION_PRESETS = {
-    "default": {**_PRESET_BASE, "font_name": "Anton", "font_size": 40,
+    "default": {**_PRESET_BASE, "font_name": "Poppins ExtraBold", "font_size": 22,
+                "highlight_color": "#FFE500", "border_width": 0.7, "shadow": 0.8,
+                "blur": 0.8, "effect": "none", "uppercase": False,
+                "max_chars": 24, "max_duration": 1.5},
+    # Previous auto-caption default: Anton uppercase with yellow pop.
+    "classic": {**_PRESET_BASE, "font_name": "Anton", "font_size": 40,
                 "highlight_color": "#FFE500", "border_width": 2, "effect": "pop",
                 "uppercase": True, "max_chars": 18},
+    # Pro mode's talking-head look: borderless Montserrat ExtraBold, dimmed
+    # inactive words, soft blurred shadow, orange accent on active word.
+    "talking": {**_PRESET_BASE, "font_name": "Montserrat ExtraBold", "font_size": 20,
+                "highlight_color": "#FF5A1F", "border_width": 0, "shadow": 1.0,
+                "blur": 1.4, "effect": "none", "uppercase": False,
+                "base_opacity": 0.6, "max_chars": 24},
     # Words appear as they are spoken, yellow active word, shadow.
     "hormozi": {**_PRESET_BASE, "font_name": "Montserrat ExtraBold", "font_size": 44,
                 "highlight_color": "#FFE500", "border_width": 4, "shadow": 2,
@@ -289,10 +312,8 @@ CAPTION_PRESETS = {
     "oneword": {**_PRESET_BASE, "font_name": "Anton", "font_size": 70,
                 "highlight_color": "#FFFFFF", "border_width": 5, "effect": "pop",
                 "uppercase": True, "max_chars": 1},
-    # Pro mode's captions (pro_mode.py): sentence case, no outline, soft
-    # shadow, the words not being said dimmed and the spoken one in the
-    # title's orange. Sized between "clean" and the default: the reference
-    # look is smaller still, and reads badly on a phone.
+    # Bigger borderless Montserrat with an orange accent: Pro mode's look
+    # before "talking".
     "cine": {**_PRESET_BASE, "font_name": "Montserrat ExtraBold", "font_size": 36,
              "highlight_color": "#FF5A1F", "border_width": 0, "shadow": 2,
              "effect": "none", "uppercase": False, "base_opacity": 0.8,
@@ -305,8 +326,13 @@ CAPTION_PRESETS = {
 }
 
 # Characters per line at font size 44, per font (Anton is condensed,
-# Montserrat wide). Mirrors lineBudget in SubtitleModal.jsx.
-_LINE_CHARS = {"Anton": 16, "Montserrat ExtraBold": 9, "Impact": 16}
+# Montserrat/Poppins wide). Mirrors lineBudget in SubtitleModal.jsx.
+_LINE_CHARS = {
+    "Anton": 16,
+    "Montserrat ExtraBold": 9,
+    "Poppins ExtraBold": 11,
+    "Impact": 16,
+}
 
 
 def line_budget(font_name, font_size):
@@ -322,8 +348,36 @@ def line_budget(font_name, font_size):
 # width of the font, for the fonts shipped in fonts/ (the ones libass renders
 # with); any other font keeps the budget and libass's own wrapping.
 _FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
-_FONT_FILES = {"Anton": "Anton-Regular.ttf", "Impact": "Anton-Regular.ttf",
-               "Montserrat ExtraBold": "Montserrat-ExtraBold.ttf"}
+_FONT_FILES = {
+    "Anton": "Anton-Regular.ttf",
+    "Impact": "Anton-Regular.ttf",
+    "Montserrat ExtraBold": "Montserrat-ExtraBold.ttf",
+    "Poppins ExtraBold": "Poppins-ExtraBold.ttf",
+}
+
+_CYRILLIC_RE = re.compile(r'[\u0400-\u04FF]')
+_CYRILLIC_LANGS = {"ru", "uk", "be", "bg", "sr", "mk", "kk", "ky", "tg", "mn"}
+_NO_CYRILLIC_FONTS = {"Poppins ExtraBold", "Anton", "Impact"}
+
+
+def _resolve_ass_font(font_name, transcript, clip_start, clip_end):
+    """Switch bundled Latin-only fonts to Montserrat ExtraBold on Cyrillic input."""
+    if font_name not in _NO_CYRILLIC_FONTS:
+        return font_name
+    lang = str((transcript or {}).get("language") or "").split("-")[0].split("_")[0].lower()
+    if lang in _CYRILLIC_LANGS:
+        return "Montserrat ExtraBold"
+    for seg in (transcript or {}).get("segments", []):
+        for w in seg.get("words", []):
+            if w.get("end", 0) > clip_start and w.get("start", 0) < clip_end:
+                if _CYRILLIC_RE.search(str(w.get("word") or "")):
+                    return "Montserrat ExtraBold"
+    return font_name
+
+
+def _fmt_ass_num(val):
+    val = round(float(val), 2)
+    return str(int(val)) if val.is_integer() else f"{val:g}"
 # ASS script virtual grid. Keep _ASS_PLAY_RES_Y and _ASS_CENTER_X together with
 # header PlayResY below: when PlayResX is omitted, libass assumes a 4:3 script
 # canvas (384x288 for PlayResY=288) and stretches horizontal coordinates to the
@@ -459,7 +513,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
                  highlight_color="#FFD700", bg_color="#000000", bg_opacity=0.0,
                  effect="none", base_opacity=1.0, uppercase=False,
                  margin_v=SAFE_MARGIN_V, split_ranges=None,
-                 reveal=False, shadow=0):
+                 reveal=False, shadow=0, blur=0.0):
     """
     Generates a karaoke-style ASS file: each block is shown like the SRT path,
     but the currently spoken word is rendered in highlight_color (modern
@@ -477,6 +531,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     the line never reflows while it fills.
     shadow: drop shadow depth in PlayRes units (0 = none). With border_width
     0 it is the soft "clean" look; a hard outline does not need it.
+    blur: edge Gaussian blur in PlayRes units (0 = crisp edges).
     max_chars=1 puts one word on screen at a time.
     """
     # Match the SRT burn path: PlayResY 288 keeps font sizes consistent.
@@ -512,6 +567,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
                 return "{\\an5}"
         return ""
 
+    font_name = _resolve_ass_font(font_name, transcript, clip_start, clip_end)
     safe_font = _sanitize_font_name(font_name)
     base_opacity = _clamp_number(base_opacity, 0.05, 1.0, 1.0)
     # Dim inactive words via a fully-opaque scaled color (NOT alpha — see
@@ -519,37 +575,41 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     primary_colour = hex_to_ass_color(_dim_hex_color(font_color, base_opacity), 1.0)
     bg_opacity = _clamp_number(bg_opacity, 0.0, 1.0, 0.0)
     border_width = _clamp_number(border_width, 0, 10, 2)
-    shadow = int(_clamp_number(shadow, 0, 6, 0))
+    shadow = _clamp_number(shadow, 0, 6, 0)
+    blur = _clamp_number(blur, 0.0, 10.0, 0.0)
 
     if bg_opacity > 0:
         border_style = 3
         outline_colour = hex_to_ass_color(bg_color, bg_opacity, fallback="000000")
-        outline_width = 1
+        outline_width = 1.0
     else:
         border_style = 1
         outline_colour = hex_to_ass_color(border_color, 1.0, fallback="000000")
-        # 0 is a real choice now (the shadow-only "clean" look); before the
-        # slider's "None" still drew a 1px outline. Without a shadow keep the
-        # old floor, or white text on a white wall disappears.
-        outline_width = int(border_width) if shadow else max(1, int(border_width))
+        # 0 is a real choice now (the shadow-only look); without a shadow
+        # keep the floor so white text stays legible on bright footage.
+        outline_width = border_width if shadow else max(1.0, border_width)
 
     back_colour = hex_to_ass_color("#000000", 0.55 if shadow else 0.0)
     highlight_inline = _hex_to_ass_inline_color(highlight_color, fallback="FFD700")
 
     # One line per block (see line_fitter). The widest thing drawn around the
     # text is the active word's own border: glow and box thicken it.
-    edge = {"glow": max(3, int(outline_width) + 2), "box": max(4, int(outline_width) + 3),
-            "highlight": max(2, round(final_fontsize * 0.12))}.get(effect, int(outline_width))
+    edge = {"glow": max(3.0, outline_width + 2), "box": max(4.0, outline_width + 3),
+            "highlight": max(2, round(final_fontsize * 0.12))}.get(effect, outline_width)
     fits = None if max_chars == 1 else line_fitter(
         font_name, final_fontsize, uppercase=uppercase,
         grow=0.08 if effect == "pop" else 0.0, padding=edge + shadow)
     blocks = _collect_word_blocks(transcript, clip_start, clip_end, max_chars, max_duration,
-                                  fits=fits)
+                                  fits=fits, strip_emoji=True)
     if not blocks:
         return False
 
-    # Inline override tags for the active word; {\r} after it resets to the
-    # (dimmed) style so the rest of the block stays untouched.
+    blur_tag = f"\\blur{_fmt_ass_num(blur)}" if blur > 0 else ""
+    line_blur = f"{{{blur_tag}}}" if blur_tag else ""
+    reset_tag = f"{{\\r{blur_tag}}}"
+
+    # Inline override tags for the active word; reset_tag after it resets to
+    # the (dimmed) style while preserving line blur.
     if effect == "glow":
         glow_bord = max(3, int(outline_width) + 2)
         active_prefix = (f"{{\\c&HFFFFFF&\\3c{highlight_inline}"
@@ -567,10 +627,10 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     elif effect == "pop":
         # Gentle pop. The old 75->112 range started the word so small that any
         # frame caught mid-animation read as a sizing bug rather than a beat.
-        active_prefix = (f"{{\\c{highlight_inline}"
+        active_prefix = (f"{{\\c{highlight_inline}{blur_tag}"
                          f"\\fscx90\\fscy90\\t(0,110,\\fscx108\\fscy108)}}")
     else:
-        active_prefix = f"{{\\c{highlight_inline}}}"
+        active_prefix = f"{{\\c{highlight_inline}{blur_tag}}}"
 
     active_style = ""
     if effect == "highlight":
@@ -602,7 +662,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{safe_font},{final_fontsize},{primary_colour},{primary_colour},"
         f"{outline_colour},{back_colour},1,0,0,0,100,100,0,0,{border_style},"
-        f"{outline_width},{shadow},{ass_alignment},10,10,{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
+        f"{_fmt_ass_num(outline_width)},{_fmt_ass_num(shadow)},{ass_alignment},10,10,{int(_clamp_number(margin_v, 0, 200, SAFE_MARGIN_V))},1\n"
         f"{active_style}"
         "\n"
         "[Events]\n"
@@ -619,7 +679,7 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
             wide = line_width(font_name, final_fontsize, lone.upper() if uppercase else lone)
             if wide > fits.budget:
                 pct = max(40, int(100 * fits.budget / wide))
-                squeeze = f"{{\\c{highlight_inline}\\fscx{pct}\\fscy{pct}}}"
+                squeeze = f"{{\\c{highlight_inline}{blur_tag}\\fscx{pct}\\fscy{pct}}}"
         for i, word in enumerate(block):
             # Event runs until the next word starts (no flicker in gaps);
             # the last word holds until the block ends.
@@ -634,15 +694,15 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
                 if uppercase:
                     text = text.upper()
                 if j == i:
-                    parts.append(f"{squeeze or active_prefix}{text}{{\\r}}")
+                    parts.append(f"{squeeze or active_prefix}{text}{reset_tag}")
                 elif reveal and j > i:
-                    parts.append(f"{{\\alpha&HFF&}}{text}{{\\r}}")
+                    parts.append(f"{{\\alpha&HFF&}}{text}{reset_tag}")
                 else:
                     parts.append(text)
 
             events.append(
                 f"Dialogue: 0,{_ass_time(ev_start)},{_ass_time(ev_end)},Default,,0,0,0,,"
-                f"{seam_prefix(ev_start)}{' '.join(parts)}"
+                f"{seam_prefix(ev_start)}{line_blur}{' '.join(parts)}"
             )
 
     if not events:

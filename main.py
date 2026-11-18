@@ -1392,7 +1392,8 @@ def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=
                 border_color=style["border_color"], border_width=style["border_width"],
                 highlight_color=style["highlight_color"], effect=style["effect"],
                 base_opacity=style["base_opacity"], uppercase=style["uppercase"],
-                shadow=style.get("shadow", 0), reveal=style.get("reveal", False)):
+                shadow=style.get("shadow", 0), reveal=style.get("reveal", False),
+                blur=style.get("blur", 0.0)):
             print("   ℹ️ No words in range — clip ships without captions.")
             return None
 
@@ -1543,7 +1544,7 @@ def pro_clip(clip_path, clip, transcript):
         out_name, updates = pro_mode.convert(
             clip_path, os.path.basename(clip_path), clip, transcript, wait=wait,
             api_key=os.getenv("GEMINI_API_KEY"), hook_seconds=hook_seconds,
-            caption_style=_subs.CAPTION_PRESETS["cine"])
+            caption_style=_subs.CAPTION_PRESETS["talking"])
     except Exception as e:
         print(f"   ℹ️ Pro mode skipped ({type(e).__name__}: {e}) — clip ships as it is.")
         return None
