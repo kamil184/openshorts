@@ -342,6 +342,24 @@ Return only:
 """
 
 
+def format_detail_prompt(*, caption_rules: str = "", **kw) -> str:
+    """Format DETAIL_PROMPT_TEMPLATE, inserting campaign caption rules if present."""
+    prompt = DETAIL_PROMPT_TEMPLATE.format(**kw)
+    if not caption_rules:
+        return prompt
+    marker = "\nTRANSCRIPT_LANGUAGE:"
+    block = f"\n{caption_rules.strip()}\n"
+    return prompt.replace(marker, f"{block}{marker}", 1) if marker in prompt else f"{prompt.rstrip()}\n{block}"
+
+
+def format_visual_prompt(*, caption_rules: str = "", caption_language: str = "", **kw) -> str:
+    """Format VISUAL_PROMPT_TEMPLATE, inserting campaign caption rules if present."""
+    if caption_language:
+        kw["language"] = caption_language
+    prompt = VISUAL_PROMPT_TEMPLATE.format(**kw)
+    return f"{prompt.rstrip()}\n\n{caption_rules.strip()}\n" if caption_rules else prompt
+
+
 def _strip_code_fences(text: str) -> str:
     text = (text or "").strip()
     if text.startswith("```"):

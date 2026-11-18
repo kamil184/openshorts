@@ -68,3 +68,14 @@ Every response is validated against the same schemas in `prompts.py`.
 Self-host `/api/process` accepts requests without a per-request Gemini key when a server model is configured, and `/api/config.localLlm` describes the models for the dashboard.
 Cloud still requires its resolved Gemini key at the request gate and hides this self-host configuration from the dashboard.
 Layout picking, subtitle detection, screen detection and hook grounding use an image-capable vision model, falling back on missing capabilities or provider failures.
+
+## Campaign presets (`presets.py`)
+
+A job submitted to `/api/process` can pass `preset=<name>` to load a YAML profile from the directory named by `PRESETS_DIR`.
+Unknown preset names or invalid YAML files fail at request time with HTTP `400`.
+Preset fields expand into job defaults before request validation, and any field sent explicitly by the caller always wins.
+A preset supports `clip_format`, `layouts`, `target_clips`, `clip_seconds` (`[min, max]`, mapped to `clip_min_seconds` and `clip_max_seconds`), `auto_hook`, and a `captions` block.
+Under `captions`, `language` overrides the copy language in the selection prompts, `required_tags` lists hashtags that must appear in TikTok and Instagram descriptions, `mention_one_of` lists creator names where at least one must appear, and `extra_instructions` appends free-form guidance to the prompt.
+See `presets.example/stream-gaming.yaml` for a generic example profile.
+At metadata finalisation in `main.py`, missing `required_tags` are appended to `video_description_for_tiktok` and `video_description_for_instagram` without modifying compliant text.
+Missing `mention_one_of` names across those descriptions or `video_title_for_youtube_short` are never invented and are recorded in `clip['caption_issues']` instead.
