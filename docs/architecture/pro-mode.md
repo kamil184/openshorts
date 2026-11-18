@@ -50,7 +50,7 @@ is shown away from what is said.
   pass, and going back to normal is what removes them. The words shown are
   kept as `pro_titles`.
 - **Captions.** A clip with burned captions and no style of its own gets the
-  `cine` preset (`subtitles.CAPTION_PRESETS`) as its `caption_style`; a style
+  `talking` preset (`subtitles.CAPTION_PRESETS`) as its `caption_style`; a style
   the user picked is never replaced. Going back to normal removes it only if
   it is still the one pro mode set (`pro_before.caption_style_set`).
 - **Which file.** The job writes no `video_url` into the metadata, so the
