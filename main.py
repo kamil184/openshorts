@@ -3058,7 +3058,10 @@ if __name__ == '__main__':
 
                 try:
                     # ffmpeg cut — re-encoding for precision on strict seconds
-                    cut_clip(input_video, clip_temp_path, start, end, i + 1)
+                    # Horizontal output delivers the cut as it is: no CRF 12
+                    # intermediate there, the old delivery settings instead.
+                    cut_clip(input_video, clip_temp_path, start, end, i + 1,
+                             **({"tier": QUALITY_FAST} if output_format == "horizontal" else {}))
 
                     # Layer order: the canonical reframe stays CLEAN, the hook
                     # is a derived hooked_ file, captions go last on top of

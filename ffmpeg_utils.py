@@ -412,7 +412,7 @@ def cut_rate_filter(input_video):
     return ["-vf", f"fps={target.numerator}/{target.denominator}"]
 
 
-def cut_clip(input_video, clip_temp_path, start, end, clip_number):
+def cut_clip(input_video, clip_temp_path, start, end, clip_number, tier=INTERMEDIATE):
     """Cut [start, end] out of the source into ``clip_temp_path``.
 
     Raises RuntimeError with ffmpeg's own stderr when the cut does not produce
@@ -430,7 +430,9 @@ def cut_clip(input_video, clip_temp_path, start, end, clip_number):
     cached for the life of the process, so it stays true while a real 1080p
     session cannot allocate on a GPU that other jobs are filling.
     """
-    encode_args = video_encode_args(INTERMEDIATE)
+    # ``tier``: INTERMEDIATE when a render re-encodes the cut; a cut that is
+    # delivered as it is (horizontal output) takes a delivery tier instead.
+    encode_args = video_encode_args(tier)
     rate = cut_rate_filter(input_video)
     command = [
         'ffmpeg', '-y',

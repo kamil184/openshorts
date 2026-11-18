@@ -57,6 +57,10 @@ def test_a_finished_job_keeps_tags_and_flags_missing_mentions(model, tmp_path):
     assert any("video_title_for_youtube_short" in i for i in clip["caption_issues"])
     assert (out / "Source_clip_1.mp4").exists()
     assert json.dumps(clip).count("#tag1") == 2
+    # Horizontal output delivers the cut itself: it is cut at the delivery
+    # quality of old (CRF 18), not as a CRF 12 intermediate.
+    settings = (out / "Source_clip_1.mp4").read_bytes()
+    assert b"crf=18.0" in settings and b"crf=12.0" not in settings
 
 
 def test_the_job_records_its_clip_format_for_later_renders(model, tmp_path):
