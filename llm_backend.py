@@ -78,6 +78,22 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
 
+def _extra_body() -> dict:
+    """Provider-specific request fields from ``LLM_EXTRA_BODY`` (a JSON object).
+
+    OpenRouter, for example, takes ``{"reasoning": {"effort": "low"},
+    "provider": {"require_parameters": true}}``. A value that is not a JSON
+    object is an operator error and fails loudly rather than being ignored.
+    """
+    raw = (os.environ.get("LLM_EXTRA_BODY") or "").strip()
+    if not raw:
+        return {}
+    extra = json.loads(raw)
+    if not isinstance(extra, dict):
+        raise ValueError("LLM_EXTRA_BODY must be a JSON object")
+    return extra
+
+
 def _client(**kwargs) -> httpx.Client:
     """Factory so tests can swap in ``httpx.MockTransport``."""
     return httpx.Client(timeout=_timeout(), **kwargs)
@@ -119,7 +135,8 @@ def generate_json(prompt: str, schema: Type[BaseModel], model: Optional[str] = N
     last_rejection: Optional[str] = None
     with _client() as client:
         for fmt in _response_formats(schema):
-            body = {"model": model, "messages": messages, "temperature": 0.2, "stream": False}
+            body = {**_extra_body(), "model": model, "messages": messages,
+                    "temperature": 0.2, "stream": False}
             if fmt is not None:
                 body["response_format"] = fmt
             resp = client.post(url, json=body, headers=_headers())

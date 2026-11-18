@@ -13,9 +13,17 @@ services:
     mem_limit: 6g
     memswap_limit: 6g
     cpus: 6.0
+    # LLM_API_KEY (and any other secret) lives outside the checkout; point
+    # OPENSHORTS_SECRETS_FILE at it in the untracked .env.
+    env_file:
+      - path: ${OPENSHORTS_SECRETS_FILE:-/dev/null}
+        required: false
     environment:
       TRANSCRIBE_BACKEND: parakeet
       PARAKEET_QUANTIZATION: int8
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-meta/muse-ember}
+      LLM_EXTRA_BODY: ${LLM_EXTRA_BODY:-{"reasoning":{"effort":"medium"},"provider":{"require_parameters":true}}}
     logging: &logging
       driver: json-file
       options:

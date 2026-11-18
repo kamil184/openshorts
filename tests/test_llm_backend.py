@@ -149,3 +149,33 @@ def test_score_batch_shrinks_for_local_models(local, monkeypatch):
     monkeypatch.delenv("LLM_BASE_URL")
     monkeypatch.delenv("LLM_SCORE_BATCH")
     assert main.score_batch_size() == 8
+
+
+# --- provider-specific request fields ----------------------------------------
+
+def test_extra_body_is_merged_but_cannot_override_the_request(local, monkeypatch):
+    monkeypatch.setenv("LLM_EXTRA_BODY", json.dumps({
+        "reasoning": {"effort": "low"},
+        "provider": {"require_parameters": True},
+        "model": "ignored/model",
+    }))
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return _completion({"windows": []})
+
+    _serve(handler, monkeypatch)
+    llm_backend.generate_json("prompt", gemini_worker.ScoreResponse)
+
+    assert seen["body"]["reasoning"] == {"effort": "low"}
+    assert seen["body"]["provider"] == {"require_parameters": True}
+    assert seen["body"]["model"] == "qwen2.5:14b"
+
+
+def test_extra_body_that_is_not_an_object_fails_loudly(local, monkeypatch):
+    monkeypatch.setenv("LLM_EXTRA_BODY", "[1, 2]")
+    _serve(lambda request: _completion({"windows": []}), monkeypatch)
+
+    with pytest.raises(ValueError, match="JSON object"):
+        llm_backend.generate_json("prompt", gemini_worker.ScoreResponse)
