@@ -404,6 +404,18 @@ class TestApiProcessIntegration:
         assert env["CLIP_MIN_SECONDS"] == "10.0" and env["CLIP_MAX_SECONDS"] == "60.0"
         assert "AUTO_HOOK" not in env
 
+    def test_only_max_below_the_preset_band_is_accepted(self, app_env):
+        app_module, _ = app_env
+        resp = self._post(
+            app_module,
+            data={"acknowledged": "true", "preset": "gaming", "clip_max_seconds": "12"},
+            files={"file": ("clip.mp4", b"x" * 100, "video/mp4")},
+        )
+        assert resp.status_code == 200, resp.text
+        env = app_module.jobs.pop(resp.json()["job_id"])["env"]
+        assert env["CLIP_MAX_SECONDS"] == "12.0"
+        assert float(env["CLIP_MIN_SECONDS"]) <= 7
+
 
 def test_remote_worker_forwards_clip_preset():
     assert remote_worker.allowed_option("CLIP_PRESET", "stream-gaming")
@@ -420,3 +432,43 @@ def test_remote_worker_forwards_clip_preset():
         "CLIP_PRESET": "stream-gaming",
         "GAMING_FACECAM_BOX": "0,0.377,0.273,0.305",
     }
+
+
+class TestReviewEdgeCases:
+    def test_one_explicit_clip_bound_stays_consistent_with_the_preset_band(self):
+        preset = {"clip_seconds": [30, 60]}
+        only_max = presets.expand_job_defaults(preset, {"clip_min_seconds": None, "clip_max_seconds": 20})
+        assert only_max["clip_max_seconds"] == 20
+        assert float(only_max["clip_min_seconds"]) <= 15
+        only_min = presets.expand_job_defaults(preset, {"clip_min_seconds": 70, "clip_max_seconds": None})
+        assert only_min["clip_min_seconds"] == 70
+        assert float(only_min["clip_max_seconds"]) >= 75
+        kept = presets.expand_job_defaults(preset, {"clip_min_seconds": 10, "clip_max_seconds": None})
+        assert kept["clip_max_seconds"] == 60
+        both = presets.expand_job_defaults(preset, {"clip_min_seconds": None, "clip_max_seconds": None})
+        assert (both["clip_min_seconds"], both["clip_max_seconds"]) == (30, 60)
+
+    @pytest.mark.parametrize("body", [
+        "captions:\n  required_tags: #SypherPK #fortnite\n",
+        "captions:\n  mention_one_of:\n",
+        "captions:\n  language:\n",
+    ])
+    def test_a_caption_rule_that_parses_to_nothing_is_an_error(self, tmp_path, body):
+        _write_preset(tmp_path, "broken", body)
+        with pytest.raises(presets.PresetValidationError, match="empty"):
+            presets.load_preset("broken", directory=str(tmp_path))
+
+    def test_a_tag_glued_to_a_word_is_not_appended_twice(self):
+        preset = {"captions": {"required_tags": ["#SypherPK"]}}
+        clip = {"video_description_for_tiktok": "gg#SypherPK",
+                "video_description_for_instagram": "nice #SypherPKfan"}
+        presets.enforce_clip(clip, preset)
+        assert clip["video_description_for_tiktok"] == "gg#SypherPK"
+        assert clip["video_description_for_instagram"] == "nice #SypherPKfan #SypherPK"
+
+    def test_an_absent_description_does_not_become_tag_only_text(self):
+        preset = {"captions": {"required_tags": ["#tag1"]}}
+        clip = {"video_description_for_tiktok": "hello"}
+        presets.enforce_clip(clip, preset)
+        assert clip["video_description_for_tiktok"] == "hello #tag1"
+        assert "video_description_for_instagram" not in clip

@@ -82,6 +82,14 @@ def _validate_captions(raw: Any) -> dict[str, Any]:
         raise PresetValidationError(
             f"Unknown preset 'captions' field(s): {', '.join(unknown)}."
         )
+    empty = sorted(key for key, value in raw.items() if value is None)
+    if empty:
+        # In YAML an unquoted '#' starts a comment, so `required_tags: #a #b`
+        # parses to null: refuse it instead of silently dropping the rule.
+        raise PresetValidationError(
+            f"Preset 'captions' field(s) {', '.join(empty)} are empty; "
+            "quote hashtags ('#tag') or remove the field."
+        )
     out: dict[str, Any] = {}
 
     if raw.get("language") is not None:
@@ -279,15 +287,40 @@ def expand_job_defaults(
 
     if "clip_seconds" in preset:
         lo, hi = preset["clip_seconds"]
-        if not _is_provided(out.get("clip_min_seconds")):
-            out["clip_min_seconds"] = lo
-        if not _is_provided(out.get("clip_max_seconds")):
-            out["clip_max_seconds"] = hi
+        has_min = _is_provided(out.get("clip_min_seconds"))
+        has_max = _is_provided(out.get("clip_max_seconds"))
+        # One explicit bound wins; the preset's other bound moves just enough
+        # to keep the band valid (max at least 5 s above min).
+        if not has_min:
+            out["clip_min_seconds"] = (
+                _clamped_bound(lo, out.get("clip_max_seconds"), -5, 5) if has_max else lo
+            )
+        if not has_max:
+            out["clip_max_seconds"] = (
+                _clamped_bound(hi, out.get("clip_min_seconds"), 5, 180) if has_min else hi
+            )
 
     if not _is_provided(out.get("auto_hook")) and "auto_hook" in preset:
         out["auto_hook"] = preset["auto_hook"]
 
     return out
+
+
+def _clamped_bound(preset_value: Any, explicit: Any, gap: float, limit: float) -> Any:
+    """``preset_value`` kept at least ``gap`` away from the caller's bound.
+
+    ``gap < 0`` derives a min below an explicit max (floored at ``limit``),
+    ``gap > 0`` a max above an explicit min (capped at ``limit``). A bound
+    that is not a number is left to the request validation to reject."""
+    try:
+        anchor = float(explicit) + gap
+    except (TypeError, ValueError):
+        return preset_value
+    if gap < 0 and preset_value > anchor:
+        return max(limit, anchor)
+    if gap > 0 and preset_value < anchor:
+        return min(limit, anchor)
+    return preset_value
 
 
 def apply_request_preset(
@@ -352,7 +385,10 @@ def caption_rules_prompt(preset: Optional[Mapping[str, Any]]) -> str:
 
 
 def _contains_token(text: str, token: str) -> bool:
-    pattern = rf"(?i)(?<!\w){re.escape(token)}(?!\w)"
+    # A hashtag glued to a word ("gg#tag") still counts; a plain name must
+    # stand on its own.
+    before = r"(?<!#)" if token.startswith("#") else r"(?<!\w)"
+    pattern = rf"(?i){before}{re.escape(token)}(?!\w)"
     return bool(re.search(pattern, text))
 
 
@@ -374,7 +410,9 @@ def enforce_clip(clip: dict[str, Any], preset: Optional[Mapping[str, Any]]) -> d
     if required_tags:
         for field in _DESCRIPTION_FIELDS:
             current = clip.get(field)
-            text = current if isinstance(current, str) else ""
+            if not isinstance(current, str):
+                continue  # absent field: never turn it into tag-only text
+            text = current
             missing = [tag for tag in required_tags if not _contains_token(text, tag)]
             if missing:
                 base = text.rstrip()
