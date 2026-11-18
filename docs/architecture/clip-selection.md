@@ -73,8 +73,12 @@ Layout picking, subtitle detection, screen detection and hook grounding use an i
 
 A job submitted to `/api/process` can pass `preset=<name>` to load a YAML profile from the directory named by `PRESETS_DIR`.
 Unknown preset names or invalid YAML files fail at request time with HTTP `400`.
+The API loads and validates the preset once and passes its content to the job as `CLIP_PRESET_JSON` (forwarded to a remote worker too), so the job never reads the file again.
+A job whose preset cannot be loaded fails with that error instead of reporting that no clips were found.
 Preset fields expand into job defaults before request validation, and any field sent explicitly by the caller always wins.
+When the caller sends only one clip-length bound, the preset's other bound moves just enough to keep the band valid.
 A preset supports `clip_format`, `layouts`, `target_clips`, `clip_seconds` (`[min, max]`, mapped to `clip_min_seconds` and `clip_max_seconds`), `auto_hook`, `trim_dead_footage` (see below), and a `captions` block.
+A `captions` field left empty is an error: in YAML an unquoted `#` starts a comment, so write hashtags as `'#tag'`.
 Under `captions`, `language` overrides the copy language in the selection prompts, `required_tags` lists hashtags that must appear in TikTok and Instagram descriptions, `mention_one_of` lists creator names where at least one must appear, and `extra_instructions` appends free-form guidance to the prompt.
 See `presets.example/stream-gaming.yaml` for a generic example profile.
 At metadata finalisation in `main.py`, missing `required_tags` are appended to `video_description_for_tiktok` and `video_description_for_instagram` without modifying compliant text.

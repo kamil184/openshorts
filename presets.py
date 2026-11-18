@@ -6,6 +6,7 @@ and are passed to pipeline subprocesses via ``CLIP_PRESET``.
 """
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -15,6 +16,10 @@ import yaml
 
 PRESETS_DIR_ENV = "PRESETS_DIR"
 ACTIVE_PRESET_ENV = "CLIP_PRESET"
+# The validated preset content, as JSON, set by the API for each job: the job
+# runs with what was submitted even if the file changes or is not on its host.
+PRESET_JSON_ENV = "CLIP_PRESET_JSON"
+PRESET_JSON_MAX_BYTES = 16 * 1024
 
 _PRESET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _TOP_KEYS = frozenset({
@@ -252,16 +257,50 @@ def load_preset(name: str, directory: Optional[str] = None) -> dict[str, Any]:
     return validate_preset(data, name=name)
 
 
+def preset_to_json(preset: Mapping[str, Any]) -> str:
+    """A validated preset as the compact JSON a job carries in its env."""
+    return json.dumps(preset, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def preset_from_json(raw: str) -> dict[str, Any]:
+    """Parse and re-validate a preset carried as JSON (``PRESET_JSON_ENV``)."""
+    if len(raw.encode("utf-8")) > PRESET_JSON_MAX_BYTES:
+        raise PresetValidationError("Preset payload is too large.")
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        raise PresetValidationError(f"Invalid preset payload: {e}") from e
+    return validate_preset(data)
+
+
 def load_active_preset(
     env: Optional[Mapping[str, str]] = None,
     directory: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    """Load the preset named by CLIP_PRESET in env, or None when unset."""
+    """The job's preset: the content in CLIP_PRESET_JSON when set, else the
+    file named by CLIP_PRESET, or None when neither is set."""
     source = os.environ if env is None else env
+    raw = source.get(PRESET_JSON_ENV) or ""
+    if raw.strip():
+        return preset_from_json(raw)
     name = (source.get(ACTIVE_PRESET_ENV) or "").strip()
     if not name:
         return None
     return load_preset(name, directory=directory)
+
+
+_job_presets: dict[tuple[str, str], Optional[dict[str, Any]]] = {}
+
+
+def job_preset() -> Optional[dict[str, Any]]:
+    """``load_active_preset()`` for this process's environment, read once.
+
+    A job process asks for its preset at several stages; every one of them
+    gets the same content, and a load error raises instead of returning None."""
+    key = (os.environ.get(ACTIVE_PRESET_ENV) or "", os.environ.get(PRESET_JSON_ENV) or "")
+    if key not in _job_presets:
+        _job_presets[key] = load_active_preset()
+    return _job_presets[key]
 
 
 def expand_job_defaults(
@@ -323,17 +362,28 @@ def _clamped_bound(preset_value: Any, explicit: Any, gap: float, limit: float) -
     return preset_value
 
 
+def resolve_request_preset(
+    preset_name: Any,
+    fields: Mapping[str, Any],
+    directory: Optional[str] = None,
+) -> tuple[Optional[str], Optional[dict[str, Any]], dict[str, Any]]:
+    """``(name, loaded preset, fields with defaults expanded)``; the preset is
+    None when ``preset_name`` is empty."""
+    if preset_name is None or (isinstance(preset_name, str) and not preset_name.strip()):
+        return None, None, dict(fields)
+    clean = _validate_name(preset_name) if isinstance(preset_name, str) else _validate_name(str(preset_name))
+    loaded = load_preset(clean, directory=directory)
+    return clean, loaded, expand_job_defaults(loaded, fields)
+
+
 def apply_request_preset(
     preset_name: Any,
     fields: Mapping[str, Any],
     directory: Optional[str] = None,
 ) -> tuple[Optional[str], dict[str, Any]]:
     """Load ``preset_name`` when non-empty and expand defaults into ``fields``."""
-    if preset_name is None or (isinstance(preset_name, str) and not preset_name.strip()):
-        return None, dict(fields)
-    clean = _validate_name(preset_name) if isinstance(preset_name, str) else _validate_name(str(preset_name))
-    loaded = load_preset(clean, directory=directory)
-    return clean, expand_job_defaults(loaded, fields)
+    clean, _loaded, expanded = resolve_request_preset(preset_name, fields, directory=directory)
+    return clean, expanded
 
 
 def caption_language(preset: Optional[Mapping[str, Any]]) -> str:

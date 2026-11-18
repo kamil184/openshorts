@@ -5836,15 +5836,19 @@ async def process_endpoint(
         preset = body.get("preset")
 
     facecam_box = None
+    preset_json = None
     if preset is not None and (not isinstance(preset, str) or preset.strip()):
         import presets as _presets
         try:
-            preset, _m = _presets.apply_request_preset(preset, {
+            preset, _loaded, _m = _presets.resolve_request_preset(preset, {
                 "clip_format": clip_format, "facecam_box": None, "layouts": layouts, "target_clips": target_clips,
                 "clip_min_seconds": clip_min_seconds, "clip_max_seconds": clip_max_seconds, "auto_hook": auto_hook,
             })
         except _presets.PresetError as e:
             raise HTTPException(status_code=400, detail=str(e))
+        # The job runs with this content, not with whatever the file holds
+        # when it starts (or on a worker that has no presets directory).
+        preset_json = _presets.preset_to_json(_loaded)
         clip_format, facecam_box, layouts, target_clips, clip_min_seconds, clip_max_seconds, auto_hook = (
             _m["clip_format"], _m.get("facecam_box"), _m["layouts"], _m["target_clips"],
             _m["clip_min_seconds"], _m["clip_max_seconds"], _m["auto_hook"],
@@ -5949,6 +5953,9 @@ async def process_endpoint(
     env.setdefault("PYTHONIOENCODING", "utf-8")
     if preset and str(preset).strip():
         env["CLIP_PRESET"] = str(preset).strip()
+    env.pop("CLIP_PRESET_JSON", None)
+    if preset_json:
+        env["CLIP_PRESET_JSON"] = preset_json
 
     # Optional layouts are per job. The renderer reads these at import time in
     # the subprocess, so they must be set before Popen — same path WATERMARK

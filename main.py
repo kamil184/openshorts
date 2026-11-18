@@ -2293,7 +2293,7 @@ def get_viral_clips(transcript_result, video_duration, viewer_clips=None):
 
         # --- Pass 2: detailed clip extraction on the shortlist ---
         min_clips, max_clips = clip_count_targets(len(shortlist))
-        caption_rules = presets.caption_rules_prompt(presets.load_active_preset())
+        caption_rules = presets.caption_rules_prompt(presets.job_preset())
 
         def _detail_prompt_for(lo, hi):
             # A split batch keeps the full clip-count band: a short list can
@@ -2380,6 +2380,8 @@ def get_viral_clips(transcript_result, video_duration, viewer_clips=None):
         # reason instead of a generic "no clips found".
         print(f"🚫 {e}")
         raise
+    except presets.PresetError:
+        raise  # a broken preset is the job's error, not "no clips"
     except Exception as e:
         print(f"❌ Model error ({model_name}): {e}")
         return None
@@ -2523,7 +2525,7 @@ def _visual_pass(model_name, mode, video_path, duration, language,
     """One vision call over one proxy file, as a video or as timestamped
     frames (``mode``). Returns ``(shorts, cost)``; ``shorts`` are clamped to
     ``[0, duration]`` of THAT file. Raises ``llm_backend.BlockedError``."""
-    active_preset = presets.load_active_preset()
+    active_preset = presets.job_preset()
     prompt = prompts.format_visual_prompt(
         video_duration=duration, language=language,
         min_clips=min_clips, max_clips=max_clips,
@@ -2612,7 +2614,7 @@ def get_visual_clips(video_path, video_duration, language="en", viewer_clips=Non
                     shorts, cost = _visual_pass(
                         model_name, mode, proxy, round(s1 - s0, 3), language,
                         per_min, v_max_clips, v_min_secs, v_max_secs, hint=hint)
-                except llm_backend.BlockedError:
+                except (llm_backend.BlockedError, presets.PresetError):
                     raise
                 except Exception as e:
                     # One bad stretch must not sink the other hours.
@@ -2645,6 +2647,8 @@ def get_visual_clips(video_path, video_duration, language="en", viewer_clips=Non
     except llm_backend.BlockedError as e:
         print(f"🚫 {e}")
         raise
+    except presets.PresetError:
+        raise
     except Exception as e:
         print(f"❌ Vision error ({model_name}): {e}")
         return None
@@ -2669,6 +2673,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     output_format = args.format
+    # The job's preset, read once: a preset that cannot be loaded fails the
+    # job here with its own error.
+    presets.job_preset()
 
     script_start_time = time.time()
 
@@ -3143,7 +3150,7 @@ if __name__ == '__main__':
 
             # Persist per-clip render results added by the workers (auto_hook)
             # and enforce preset caption rules after hook_grounding.reground.
-            active_preset = presets.load_active_preset()
+            active_preset = presets.job_preset()
             if active_preset:
                 presets.enforce_clips(shorts, active_preset)
             if active_preset or any(

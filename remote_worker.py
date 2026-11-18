@@ -30,6 +30,7 @@ import re
 import secrets
 import time
 
+import presets
 from jsonfile import write_json_atomic
 
 CLAIM_FILE = ".remote.json"
@@ -64,7 +65,7 @@ _IMAGE_FILE_BYTES = 32 * 1024 * 1024
 # storage secret: this host downloads the source and delivers the result.
 _OPTION_NAMES = frozenset({
     "WATERMARK", "MAX_SOURCE_MINUTES", "SOURCE_CAP_MINUTES", "HOOK_LAZY",
-    "CUT_MAX_FPS", "CLIP_PRESET", "GAMING_FACECAM_BOX"})
+    "CUT_MAX_FPS", "CLIP_PRESET", "GAMING_FACECAM_BOX", presets.PRESET_JSON_ENV})
 _OPTION_PREFIXES = ("AUTO_", "CLIP_")
 _OPTION_VALUE = re.compile(r"^[A-Za-z0-9 _.,:+-]{0,120}$")
 _FORMATS = frozenset({"auto", "vertical", "horizontal", "square"})
@@ -74,6 +75,13 @@ def allowed_option(name, value=""):
     """Whether ``name=value`` is a job setting that may cross between hosts."""
     if not isinstance(name, str) or not re.match(r"^[A-Z][A-Z0-9_]{0,63}$", name):
         return False
+    if name == presets.PRESET_JSON_ENV:
+        # The job's preset content: free text, so checked as a whole preset.
+        try:
+            presets.preset_from_json(str(value))
+        except presets.PresetError:
+            return False
+        return True
     if name not in _OPTION_NAMES and not name.startswith(_OPTION_PREFIXES):
         return False
     return bool(_OPTION_VALUE.match(str(value)))
