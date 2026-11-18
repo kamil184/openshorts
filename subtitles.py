@@ -488,10 +488,21 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     # (start, end) in clip seconds (layout_ranges.split_ranges); the style's
     # own alignment still rules everywhere else. Only the ASS path can do
     # this: SRT burns carry one alignment for the whole file.
-    seam_ranges = [(float(a), float(b)) for a, b in (split_ranges or [])]
+    def _parse_seam(r):
+        if isinstance(r, dict):
+            seam = r.get("seam")
+            return float(r["start"]), float(r["end"]), float(seam) if seam is not None else None
+        return float(r[0]), float(r[1]), float(r[2]) if len(r) > 2 and r[2] is not None else None
+
+    seam_ranges = [_parse_seam(r) for r in (split_ranges or [])]
 
     def seam_prefix(t):
-        return "{\\an5}" if any(a <= t < b for a, b in seam_ranges) else ""
+        for a, b, seam in seam_ranges:
+            if a <= t < b:
+                if seam is not None:
+                    return f"{{\\an5\\pos(192,{round(seam * 288, 1):g})}}"
+                return "{\\an5}"
+        return ""
 
     safe_font = _sanitize_font_name(font_name)
     base_opacity = _clamp_number(base_opacity, 0.05, 1.0, 1.0)

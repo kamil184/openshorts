@@ -109,6 +109,17 @@ class TestCaptionBands:
         assert hp.caption_bands([{"start": 0, "end": 5, "layout": "split"}], 0, 5,
                                 has_captions=False) == []
 
+    def test_custom_seam_places_hook_below_seam_and_off_top_face(self):
+        ranges = [{"start": 0, "end": 20, "layout": "stack", "seam": 0.30}]
+        bands = hp.caption_bands(ranges, 0, 5)
+        assert bands == [(0.22, 0.38)]
+        top_face = (0.35, 0.09, 0.65, 0.22)
+        y, cost = hp.choose_y(BOX_W, BOX_H, [[top_face]] * 6, bands)
+        assert cost == 0
+        assert y == pytest.approx(0.38)
+        assert _off_head(y, BOX_H, top_face)
+        assert _off_bands(y, BOX_H, bands)
+
 
 class TestBestScale:
     def test_keeps_full_size_when_it_fits(self):

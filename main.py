@@ -1740,6 +1740,16 @@ def process_video_to_vertical(input_video, final_output_video, aspect_ratio=ASPE
     engine only — the v1 loop below has no layout concept beyond its own
     classifier).
     """
+    if not force_strategy and not crop_overrides:
+        import clip_formats
+        fmt = clip_formats.from_env()
+        if fmt.name != "default":
+            t0 = time.time()
+            result = fmt.render(input_video, final_output_video, aspect_ratio,
+                                watermark=watermark)
+            print(f"   ⏱️ Clip format ({fmt.name}) total: {time.time() - t0:.1f}s")
+            return result
+
     # v2 engine: analyze downscaled, render natively in ffmpeg. Any failure
     # falls back to the v1 frame loop below so a v2 edge case can't kill jobs.
     if os.environ.get("REFRAME_ENGINE", "v2").strip().lower() != "v1":

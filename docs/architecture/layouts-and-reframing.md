@@ -92,6 +92,16 @@ So the picker and the scene classifier are skipped and every scene renders TRACK
   A ~12% push on the clip's beats, riding the TRACK path by widening its per-frame crop command from x-only to w/h/x/y.
   Beats come from the audio envelope; `emphasis_times` is a plain list of seconds so transcript hook words can replace it.
 
+## Whole-clip formats (`clip_formats/`, `CLIP_FORMAT`)
+
+Jobs can select a whole-clip vertical format (`clip_format` on `POST /api/process`, forwarded as `CLIP_FORMAT`), unless overridden by manual editor framing (`force_strategy` or `crop_overrides`).
+Each format implements `ClipFormat` (`analyze` once per clip and `compose` a 9:16 filtergraph plus `layout_ranges`) and renders through the shared `encode_scenes` path.
+- **`default`** (`clip_formats/default.py`): delegates unchanged to the scene-by-scene `reframe_v2` pipeline.
+- **`gaming_stack`** (`clip_formats/gaming_stack.py`): static 30/70 stack with the streamer's webcam on top (`GAMING_CAMERA_RATIO`, default `0.30`) and a static centre gameplay crop below.
+  An explicit `GAMING_FACECAM_BOX=x,y,w,h` (normalised 0-1) skips detection and keeps the camera crop inside those known bounds; otherwise `camera_inset.detect` finds the inset once per clip.
+  The camera crop matches the band's aspect ratio without stretching, the gameplay crop shifts clear of the webcam if they overlap, and missing insets fall back to a full-height static centre gameplay crop (never TRACK).
+  Stacked clips write a `seam` fraction (e.g. `0.30`) in `<clip>.layout.json` so `subtitles.generate_ass` centres karaoke words on the seam (`\an5\pos`) and `hook_placement.caption_bands` places auto-hooks right below the seam captions, off the face.
+
 ## Key classes
 
 - `SmoothedCameraman`: stabilized camera movement with safe-zone logic (prevents jitter).

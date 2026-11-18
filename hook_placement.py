@@ -105,7 +105,15 @@ def caption_bands(ranges, window_start, window_end, has_captions=True):
         if e <= s:
             continue
         covered += e - s
-        bands.add(SEAM_CAPTIONS if layout == "split" else BOTTOM_CAPTIONS)
+        seam = r.get("seam")
+        try:
+            seam_f = float(seam) if seam is not None else None
+        except (TypeError, ValueError):
+            seam_f = None
+        if seam_f is not None and 0.0 < seam_f < 1.0:
+            bands.add((round(max(0.0, seam_f - 0.08), 4), round(min(1.0, seam_f + 0.08), 4)))
+        else:
+            bands.add(SEAM_CAPTIONS if layout == "split" else BOTTOM_CAPTIONS)
     # Any part of the window no range describes keeps the default captions.
     if covered < (window_end - window_start) - 1e-3:
         bands.add(BOTTOM_CAPTIONS)

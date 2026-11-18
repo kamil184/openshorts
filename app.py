@@ -2412,6 +2412,8 @@ def _resume_candidates(held: set, now: float):
             write_json_atomic(manifest_path, m)
         except Exception:
             pass
+        remote_worker.clear(os.path.join(OUTPUT_DIR, job_id),
+                            purge=m.get("stage") != _DELIVERY_STAGE)
         picked.append((job_id, m))
     return keep_reservations, picked
 
@@ -2435,11 +2437,12 @@ def _apply_rate_cap(env) -> None:
         env.pop("CUT_MAX_FPS", None)
 
 
-def _register_resumed(picked) -> int:
+def _register_resumed(picked, clear_remote: bool = True) -> int:
     """Loop part of the resume scan: a record and a heap entry per picked
     manifest. The heap orders them by submission time, whatever order the
     directory listing gave."""
     resumed = 0
+    base_env = child_env()
     for job_id, m in picked:
         if job_id in jobs:
             continue  # registered while the disk was being read
@@ -2449,7 +2452,7 @@ def _register_resumed(picked) -> int:
         job_path = os.path.join(OUTPUT_DIR, job_id)
         # Rebuild env from scratch — the manifest holds no secrets. Managed
         # (cloud) jobs get the server key; self-host falls back to its env key.
-        env = child_env()
+        env = dict(base_env)
         try:
             from cloud import proxy_ledger as _pl
             if BILLING_ENABLED and _pl.budget_exceeded_sync():
@@ -2481,7 +2484,8 @@ def _register_resumed(picked) -> int:
         # Whatever a remote worker was doing for the instance that held this
         # job is void now: its next call is refused and it drops the job. A
         # job cut during its delivery keeps the clips it is delivering.
-        remote_worker.clear(job_path, purge=m.get("stage") != _DELIVERY_STAGE)
+        if clear_remote:
+            remote_worker.clear(job_path, purge=m.get("stage") != _DELIVERY_STAGE)
         jobs[job_id] = {
             'status': 'queued',
             'logs': _TimedLog([f"♻️ Resuming your video after a server update (attempt {attempts})."]),
@@ -2538,7 +2542,7 @@ def _resume_interrupted_jobs() -> set:
     simply not resumed; its reservation is then refunded as a normal orphan.
     """
     keep, picked = _resume_candidates(set(jobs), time.time())
-    _register_resumed(picked)
+    _register_resumed(picked, clear_remote=False)
     return keep
 
 
@@ -2546,7 +2550,7 @@ async def _resume_interrupted_jobs_async() -> set:
     """The periodic resume scan: the manifests are read (and rewritten) in a
     worker thread, only the records and the heap are touched on the loop."""
     keep, picked = await asyncio.to_thread(_resume_candidates, set(jobs), time.time())
-    _register_resumed(picked)
+    _register_resumed(picked, clear_remote=False)
     _start_pending_deliveries()
     return keep
 
@@ -5779,6 +5783,7 @@ async def process_endpoint(
     acknowledged: Optional[str] = Form(None),
     output_format: Optional[str] = Form(None),
     layouts: Optional[str] = Form(None),
+    clip_format: Optional[str] = Form(None),
     force_low_quality: Optional[str] = Form(None),
     webhook_url: Optional[str] = Form(None),
     webhook_secret: Optional[str] = Form(None),
@@ -5813,6 +5818,7 @@ async def process_endpoint(
         force_low = bool(body.get("force_low_quality"))
         output_format = body.get("output_format")
         layouts = body.get("layouts")
+        clip_format = body.get("clip_format")
         webhook_url = body.get("webhook_url")
         webhook_secret = body.get("webhook_secret")
         target_clips = body.get("target_clips")
@@ -5836,6 +5842,14 @@ async def process_endpoint(
         layouts = [p for p in layouts.split(",") if p.strip()]
     elif not isinstance(layouts, list):
         layouts = []
+
+    if clip_format is not None and str(clip_format).strip():
+        import clip_formats
+        clip_format = str(clip_format).strip().lower()
+        if clip_format not in clip_formats.available():
+            raise HTTPException(status_code=400, detail=f"Unknown clip_format: {clip_format!r}")
+    else:
+        clip_format = None
 
     # Module handover (issue #68): reuse the Thumbnail Studio source video and
     # its transcript so publishing to YouTube can flow straight into clip
@@ -5924,6 +5938,8 @@ async def process_endpoint(
     env.update(chosen)
     if chosen:
         print(f"[layouts] job={job_id} enabled={sorted(chosen)}")
+    if clip_format and clip_format != "default":
+        env["CLIP_FORMAT"] = clip_format
 
     # Auto-hook: burn each clip's Gemini hook text during the render. Off when
     # the field is absent, so API/MCP/webhook callers keep their old output

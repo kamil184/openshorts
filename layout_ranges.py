@@ -29,20 +29,14 @@ def sidecar_path(video_path):
 
 
 def write(video_path, ranges):
-    """``ranges``: iterable of (start_s, end_s, strategy) or (start_s, end_s,
-    strategy, content), ``content`` being the (top, bottom) frame fractions
-    the picture fills on a layout that floats it over a blurred backdrop
-    (WIDE), or None. Best effort: a failure here must never fail a render that
-    already succeeded."""
-    payload = []
-    for r in ranges:
-        s, e, layout = r[:3]
-        entry = {"start": round(float(s), 3), "end": round(float(e), 3),
-                 "layout": str(layout).lower()}
-        band = _band(r[3] if len(r) > 3 else None)
-        if band:
-            entry["content"] = list(band)
-        payload.append(entry)
+    """``ranges``: iterable of (start_s, end_s, strategy), optional content/seam
+    tuples, or dicts with ``start``, ``end``, ``layout`` and optional
+    ``content`` / ``seam``. Best effort: a failure here must never fail a
+    render that already succeeded."""
+    payload = normalise(ranges)
+    for entry in payload:
+        entry["start"] = round(entry["start"], 3)
+        entry["end"] = round(entry["end"], 3)
     try:
         with open(sidecar_path(video_path), "w") as f:
             json.dump({"ranges": payload}, f)
@@ -75,19 +69,30 @@ def _band(value):
     return None
 
 
+def _seam(value):
+    """A valid seam height fraction in (0, 1), or None."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(v, 4) if 0.0 < v < 1.0 else None
+
+
 def normalise(ranges):
     """Accept the sidecar/metadata shape or bare tuples; drop anything odd
     (an old metadata file, a hand-edited value) instead of raising. A
-    ``content`` band is kept when it is valid and dropped otherwise."""
+    ``content`` band or ``seam`` fraction is kept when valid and dropped
+    otherwise."""
     out = []
     for r in ranges or []:
         try:
             if isinstance(r, dict):
                 s, e, layout = r["start"], r["end"], r.get("layout", "")
-                band = r.get("content")
+                band, seam = r.get("content"), r.get("seam")
             else:
                 s, e, layout = r[:3]
                 band = r[3] if len(r) > 3 else None
+                seam = r[4] if len(r) > 4 else None
             s, e = float(s), float(e)
         except (KeyError, TypeError, ValueError):
             continue
@@ -96,17 +101,26 @@ def normalise(ranges):
             band = _band(band)
             if band:
                 entry["content"] = list(band)
+            seam = _seam(seam)
+            if seam is not None:
+                entry["seam"] = seam
             out.append(entry)
     return out
 
 
 def split_ranges(ranges):
-    """(start, end) pairs of the stretches where captions belong on the seam."""
-    return [(r["start"], r["end"]) for r in normalise(ranges) if r["layout"] == "split"]
+    """(start, end) or (start, end, seam) stretches where captions sit on a seam."""
+    out = []
+    for r in normalise(ranges):
+        if "seam" in r:
+            out.append((r["start"], r["end"], r["seam"]))
+        elif r["layout"] == "split":
+            out.append((r["start"], r["end"]))
+    return out
 
 
 def in_split(t, splits):
-    return any(s <= t < e for s, e in splits or [])
+    return any(r[0] <= t < r[1] for r in splits or [])
 
 
 def remap(ranges, segments):
@@ -133,6 +147,8 @@ def remap(ranges, segments):
                          "layout": r["layout"]}
                 if "content" in r:
                     moved["content"] = r["content"]
+                if "seam" in r:
+                    moved["seam"] = r["seam"]
                 out.append(moved)
         offset += seg_e - seg_s
     return out

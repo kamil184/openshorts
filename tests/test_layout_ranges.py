@@ -41,6 +41,15 @@ class TestSidecar:
     def test_write_failure_does_not_raise(self, tmp_path):
         layout_ranges.write(str(tmp_path / "missing_dir" / "c.mp4"), [(0, 1, "split")])
 
+    def test_seam_roundtrip_and_split_ranges(self, tmp_path):
+        clip = str(tmp_path / "stack.mp4")
+        layout_ranges.write(clip, [{"start": 0, "end": 10, "layout": "stack", "seam": 0.30}])
+        got = layout_ranges.read(clip)
+        assert got == [{"start": 0.0, "end": 10.0, "layout": "stack", "seam": 0.3}]
+        assert layout_ranges.split_ranges(got) == [(0.0, 10.0, 0.3)]
+        assert layout_ranges.in_split(5.0, layout_ranges.split_ranges(got)) is True
+        assert layout_ranges.in_split(12.0, layout_ranges.split_ranges(got)) is False
+
 
 class TestSeamCaptions:
     def _events(self, tmp_path, split_ranges, **kw):
@@ -75,6 +84,14 @@ class TestSeamCaptions:
         header = out.read_text(encoding="utf-8-sig")
         assert ",8,10,10," in header  # Alignment 8 = top in the Style line
 
+    def test_custom_seam_positions_words_at_seam_height(self, tmp_path):
+        ev = self._events(tmp_path, [(2.5, 4.0, 0.30)])
+        first_block = [e for e in ev if "one" in e]
+        second_block = [e for e in ev if "three" in e]
+        assert first_block and second_block
+        assert all("\\pos" not in e and "\\an5" not in e for e in first_block)
+        assert all(e.split(",,")[-1].startswith("{\\an5\\pos(192,86.4)}") for e in second_block)
+
 
 class TestCaptionerReadsSidecar:
     def test_auto_caption_uses_sidecar_when_not_told(self, tmp_path, monkeypatch):
@@ -107,6 +124,11 @@ class TestRemapAcrossCut:
 
     def test_no_input_ranges_means_none(self):
         assert layout_ranges.remap([], [{"start": 0, "end": 5}]) == []
+
+    def test_remap_preserves_seam(self):
+        ranges = [{"start": 0, "end": 12, "layout": "stack", "seam": 0.30}]
+        got = layout_ranges.remap(ranges, [{"start": 2, "end": 8}])
+        assert got == [{"start": 0.0, "end": 6.0, "layout": "stack", "seam": 0.3}]
 
     def test_fast_recut_carries_the_sidecar(self, tmp_path, monkeypatch):
         import shutil
