@@ -56,8 +56,12 @@ class ClipFormat(ABC):
 
     @abstractmethod
     def analyze(self, input_video: str, orig_w: int, orig_h: int,
-                out_w: int, out_h: int, duration: float) -> Any:
-        """Inspect the clip once and return format-specific analysis."""
+                out_w: int, out_h: int, duration: float,
+                facecam_box: Any = None) -> Any:
+        """Inspect the clip once and return format-specific analysis.
+
+        ``facecam_box``: the job's webcam box (normalised ``[x, y, w, h]`` or
+        ``"x,y,w,h"``); None reads ``GAMING_FACECAM_BOX`` from the environment."""
 
     @abstractmethod
     def compose(self, analysis: Any, orig_w: int, orig_h: int,
@@ -67,7 +71,8 @@ class ClipFormat(ABC):
     def render(self, input_video: str, final_output_video: str,
                aspect_ratio: float, watermark: bool = False,
                force_strategy: Optional[str] = None,
-               crop_overrides: Optional[dict] = None) -> bool:
+               crop_overrides: Optional[dict] = None,
+               facecam_box: Any = None) -> bool:
         """Analyze, compose, encode ``final_output_video`` and write layout sidecar."""
         import layout_ranges
         import main as m
@@ -75,7 +80,8 @@ class ClipFormat(ABC):
 
         orig_w, orig_h, fps, duration = _probe_video(input_video)
         out_w, out_h = reframe_v2.delivery_size(orig_w, orig_h, aspect_ratio)
-        analysis = self.analyze(input_video, orig_w, orig_h, out_w, out_h, duration)
+        analysis = self.analyze(input_video, orig_w, orig_h, out_w, out_h, duration,
+                                facecam_box=facecam_box)
         plan = self.compose(analysis, orig_w, orig_h, out_w, out_h, duration)
 
         logo = m.watermark_logo_path() if watermark else None

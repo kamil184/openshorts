@@ -57,3 +57,13 @@ def test_a_finished_job_keeps_tags_and_flags_missing_mentions(model, tmp_path):
     assert any("video_title_for_youtube_short" in i for i in clip["caption_issues"])
     assert (out / "Source_clip_1.mp4").exists()
     assert json.dumps(clip).count("#tag1") == 2
+
+
+def test_the_job_records_its_clip_format_for_later_renders(model, tmp_path):
+    env = jh.job_env(model, CLIP_FORMAT="gaming_stack", GAMING_FACECAM_BOX="0,0.5,0.3,0.4")
+    proc, out = jh.start_job(tmp_path, env)
+    log = "\n".join(_lines(proc))
+    assert proc.wait(timeout=300) == 0, log
+    meta = jh.metadata(out)
+    assert meta["clip_format"] == "gaming_stack"
+    assert meta["facecam_box"] == [0.0, 0.5, 0.3, 0.4]

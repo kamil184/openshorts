@@ -10,7 +10,8 @@ class DefaultFormat(ClipFormat):
     name = "default"
 
     def analyze(self, input_video: str, orig_w: int, orig_h: int,
-                out_w: int, out_h: int, duration: float) -> Any:
+                out_w: int, out_h: int, duration: float,
+                facecam_box: Any = None) -> Any:
         return None
 
     def compose(self, analysis: Any, orig_w: int, orig_h: int,
@@ -20,7 +21,8 @@ class DefaultFormat(ClipFormat):
     def render(self, input_video: str, final_output_video: str,
                aspect_ratio: float, watermark: bool = False,
                force_strategy: Optional[str] = None,
-               crop_overrides: Optional[dict] = None) -> bool:
+               crop_overrides: Optional[dict] = None,
+               facecam_box: Any = None) -> bool:
         import reframe_v2
 
         return reframe_v2.render(

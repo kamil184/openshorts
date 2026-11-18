@@ -1584,7 +1584,7 @@ def trim_subtitle_band(input_video, band):
 
 def render_clip(input_video, final_output_video, output_format="auto",
                 force_strategy=None, crop_overrides=None, watermark=False,
-                subtitle_band=None):
+                subtitle_band=None, clip_format=None, facecam_box=None):
     """Route a cut clip through the right renderer for the chosen output format.
     vertical/auto -> 9:16 reframe, square -> 1:1 reframe, horizontal -> keep.
     ``force_strategy`` (e.g. 'WIDE'/'TRACK') pins every scene's layout — the
@@ -1596,18 +1596,22 @@ def render_clip(input_video, final_output_video, output_format="auto",
     ``subtitle_band`` (the job metadata's ``source_subtitle_band``) trims the
     source's own burned-in subtitles off the bottom first, so our captions are
     the only text layer. Every render from the source passes it: the job, the
-    recut and the editor's re-render."""
+    recut and the editor's re-render.
+    ``clip_format`` / ``facecam_box`` (the job metadata's): the whole-clip
+    format to render with; None takes ``CLIP_FORMAT`` from the environment."""
     trimmed = trim_subtitle_band(input_video, subtitle_band)
     try:
         return _render_clip(trimmed, final_output_video, output_format,
-                            force_strategy, crop_overrides, watermark)
+                            force_strategy, crop_overrides, watermark,
+                            clip_format=clip_format, facecam_box=facecam_box)
     finally:
         if trimmed != input_video and os.path.exists(trimmed):
             os.remove(trimmed)
 
 
 def _render_clip(input_video, final_output_video, output_format,
-                 force_strategy, crop_overrides, watermark):
+                 force_strategy, crop_overrides, watermark,
+                 clip_format=None, facecam_box=None):
     if output_format == "horizontal":
         ok = finalize_clip_passthrough(input_video, final_output_video)
         if ok and watermark:
@@ -1617,7 +1621,8 @@ def _render_clip(input_video, final_output_video, output_format,
     return process_video_to_vertical(input_video, final_output_video, aspect_ratio=aspect,
                                      force_strategy=force_strategy,
                                      crop_overrides=crop_overrides,
-                                     watermark=watermark)
+                                     watermark=watermark,
+                                     clip_format=clip_format, facecam_box=facecam_box)
 
 
 # Watermark geometry, as fractions of the clip width/height.
@@ -1732,7 +1737,8 @@ def mark_delivery(final_path, marker=None):
 
 
 def process_video_to_vertical(input_video, final_output_video, aspect_ratio=ASPECT_RATIO,
-                              force_strategy=None, crop_overrides=None, watermark=False):
+                              force_strategy=None, crop_overrides=None, watermark=False,
+                              clip_format=None, facecam_box=None):
     """
     Core logic to reframe a horizontal video to a target aspect ratio using
     scene detection and Active Speaker Tracking (MediaPipe).
@@ -1743,13 +1749,21 @@ def process_video_to_vertical(input_video, final_output_video, aspect_ratio=ASPE
     """
     if not force_strategy and not crop_overrides:
         import clip_formats
-        fmt = clip_formats.from_env()
+        fmt = clip_formats.get(clip_format) if clip_format else clip_formats.from_env()
         if fmt.name != "default":
             t0 = time.time()
-            result = fmt.render(input_video, final_output_video, aspect_ratio,
-                                watermark=watermark)
-            print(f"   ⏱️ Clip format ({fmt.name}) total: {time.time() - t0:.1f}s")
-            return result
+            try:
+                # An explicit format comes with its own box: "" means detect.
+                result = fmt.render(input_video, final_output_video, aspect_ratio,
+                                    watermark=watermark,
+                                    facecam_box=(facecam_box or "") if clip_format else None)
+                print(f"   ⏱️ Clip format ({fmt.name}) total: {time.time() - t0:.1f}s")
+                return result
+            except Exception as e:
+                # Like v2 -> v1 below: degrade to the default reframe rather
+                # than lose the clip.
+                print(f"   ⚠️ Clip format {fmt.name} failed ({type(e).__name__}: {e}) — "
+                      f"falling back to the default reframe")
 
     # v2 engine: analyze downscaled, render natively in ffmpeg. Any failure
     # falls back to the v1 frame loop below so a v2 edge case can't kill jobs.
@@ -3008,6 +3022,13 @@ if __name__ == '__main__':
             # --keep-original) or in uploads/ (upload jobs).
             clips_data['source_video'] = os.path.basename(input_video)
             clips_data['output_format'] = output_format
+            # The editor re-renders in the API process, which does not have
+            # this job's environment: record the format it was rendered with.
+            from clip_formats import gaming_stack as _gs
+            clips_data['clip_format'] = (os.environ.get("CLIP_FORMAT") or "default").strip().lower()
+            _box = _gs.normalised_facecam_box(os.environ.get("GAMING_FACECAM_BOX"))
+            if _box:
+                clips_data['facecam_box'] = _box
             if source_subtitle_band:
                 clips_data['source_subtitle_band'] = source_subtitle_band
             # Campaign tags go in before anything reads this file; mentions

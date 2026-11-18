@@ -5964,8 +5964,12 @@ async def process_endpoint(
     env.update(chosen)
     if chosen:
         print(f"[layouts] job={job_id} enabled={sorted(chosen)}")
-    if clip_format and clip_format != "default":
+    # A format the request (or its preset) names replaces the server-wide
+    # CLIP_FORMAT / GAMING_FACECAM_BOX, "default" included; without one the
+    # server's settings apply.
+    if clip_format:
         env["CLIP_FORMAT"] = clip_format
+        env.pop("GAMING_FACECAM_BOX", None)
     if facecam_box is not None:
         env["GAMING_FACECAM_BOX"] = ",".join(f"{float(v):g}" for v in facecam_box)
 
@@ -7189,6 +7193,19 @@ class RerenderRequest(BaseModel):
     framing: Optional[str] = None
 
 
+def _job_clip_format(data):
+    """``clip_format`` / ``facecam_box`` kwargs for a re-render, from the job
+    metadata (read as data: a known format name and a valid box, or nothing).
+    Jobs from before these keys were recorded keep the server default."""
+    import clip_formats
+    from clip_formats import gaming_stack
+    name = data.get('clip_format')
+    if not isinstance(name, str) or name.strip().lower() not in clip_formats.available():
+        return {}
+    return {"clip_format": name.strip().lower(),
+            "facecam_box": gaming_stack.normalised_facecam_box(data.get('facecam_box'))}
+
+
 # Manual framing -> reframe-engine strategy. 'full' shows the whole source
 # frame (WIDE: no side-cropping, blurred filler bands); 'track' forces the
 # subject-tracking crop. Anything non-auto needs the retained source video.
@@ -7329,6 +7346,7 @@ async def _rerender_locked(req: RerenderRequest, request: Request, job):
             force_strategy=force_strategy,
             captions_transcript=v_transcript,
             captioner=_recut_captioner(clip),
+            **_job_clip_format(data),
             # Trim the source's own subtitles only when ours go back on.
             subtitle_band=(data.get('source_subtitle_band')
                            if v_transcript else None))
@@ -7937,6 +7955,7 @@ async def _reframe_locked(req: ReframeRequest, request: Request, job, overrides)
             crop_overrides=overrides,
             captions_transcript=v_transcript,
             captioner=_recut_captioner(clip),
+            **_job_clip_format(data),
             # Trim the source's own subtitles only when ours go back on.
             subtitle_band=(data.get('source_subtitle_band')
                            if v_transcript else None))

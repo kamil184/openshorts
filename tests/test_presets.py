@@ -391,7 +391,7 @@ class TestApiProcessIntegration:
         job = app_module.jobs.pop(resp.json()["job_id"])
         env = job["env"]
         assert env["CLIP_PRESET"] == "gaming"
-        assert "CLIP_FORMAT" not in env
+        assert env["CLIP_FORMAT"] == "default"
         assert "SCREENCAST_LAYOUT" not in env
         assert env["CLIP_TARGET_MIN"] == "3" and env["CLIP_TARGET_MAX"] == "3"
         assert env["CLIP_MIN_SECONDS"] == "10.0" and env["CLIP_MAX_SECONDS"] == "60.0"

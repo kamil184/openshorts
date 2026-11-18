@@ -25,21 +25,36 @@ def camera_ratio() -> float:
     return val
 
 
-def parse_facecam_box(raw: Optional[str], orig_w: int, orig_h: int) -> Optional[tuple[int, int, int, int]]:
-    """Parse ``GAMING_FACECAM_BOX=x,y,w,h`` (normalised 0-1) into pixel bounds."""
-    if not raw or not str(raw).strip():
+def normalised_facecam_box(raw: Any) -> Optional[list[float]]:
+    """``[x, y, w, h]`` (normalised 0-1) from ``"x,y,w,h"`` or a 4-item list,
+    or None when it is absent or not a valid box."""
+    if raw is None or isinstance(raw, bool):
         return None
-    parts = [p.strip() for p in str(raw).split(",")]
-    if len(parts) != 4:
+    if isinstance(raw, (list, tuple)):
+        parts = list(raw)
+    else:
+        if not str(raw).strip():
+            return None
+        parts = [p.strip() for p in str(raw).split(",")]
+    if len(parts) != 4 or any(isinstance(p, bool) for p in parts):
         return None
     try:
         nx, ny, nw, nh = (float(p) for p in parts)
-    except ValueError:
+    except (TypeError, ValueError):
         return None
     if not all(math.isfinite(v) for v in (nx, ny, nw, nh)):
         return None
     if not (0.0 <= nx < 1.0 and 0.0 <= ny < 1.0 and 0.0 < nw <= 1.0 and 0.0 < nh <= 1.0):
         return None
+    return [nx, ny, nw, nh]
+
+
+def parse_facecam_box(raw: Any, orig_w: int, orig_h: int) -> Optional[tuple[int, int, int, int]]:
+    """Parse ``GAMING_FACECAM_BOX=x,y,w,h`` (normalised 0-1) into pixel bounds."""
+    box = normalised_facecam_box(raw)
+    if box is None:
+        return None
+    nx, ny, nw, nh = box
     x = max(0, min(orig_w - 2, int(round(nx * orig_w))))
     y = max(0, min(orig_h - 2, int(round(ny * orig_h))))
     w = max(2, min(orig_w - x, int(round(nw * orig_w))))
@@ -214,8 +229,10 @@ class GamingStackFormat(ClipFormat):
     name = "gaming_stack"
 
     def analyze(self, input_video: str, orig_w: int, orig_h: int,
-                out_w: int, out_h: int, duration: float) -> dict[str, Any]:
-        env_box = parse_facecam_box(os.environ.get("GAMING_FACECAM_BOX"), orig_w, orig_h)
+                out_w: int, out_h: int, duration: float,
+                facecam_box: Any = None) -> dict[str, Any]:
+        raw = os.environ.get("GAMING_FACECAM_BOX") if facecam_box is None else facecam_box
+        env_box = parse_facecam_box(raw, orig_w, orig_h)
         if env_box is not None:
             return {"box": env_box, "known_bounds": True, "source": "env"}
 

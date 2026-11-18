@@ -272,3 +272,66 @@ class TestDetectedInsetGameplay:
         box = (800, 700, 320, 240)  # bottom-centre webcam inside the centre crop
         plan = fmt.compose({"box": box, "known_bounds": False}, 1920, 1080, 1080, 1920, 10.0)
         assert not gs._overlaps(plan.meta["game_crop"], box)
+
+
+class TestFormatFallback:
+    def test_a_failing_clip_format_falls_back_to_the_default_reframe(self, monkeypatch, tmp_path):
+        main = pytest.importorskip("main")
+        reframe_v2 = pytest.importorskip("reframe_v2")
+        monkeypatch.setenv("CLIP_FORMAT", "gaming_stack")
+        fmt = clip_formats.get("gaming_stack")
+
+        def broken(*a, **kw):
+            raise RuntimeError("ffprobe failed")
+
+        seen = {}
+        monkeypatch.setattr(fmt, "render", broken)
+        monkeypatch.setattr(reframe_v2, "render", lambda *a, **kw: seen.update(called=True) or True)
+        ok = main.process_video_to_vertical(str(tmp_path / "in.mp4"), str(tmp_path / "out.mp4"))
+        assert ok is True
+        assert seen.get("called") is True
+
+    def test_an_explicit_format_beats_the_process_env(self, monkeypatch, tmp_path):
+        main = pytest.importorskip("main")
+        reframe_v2 = pytest.importorskip("reframe_v2")
+        monkeypatch.delenv("CLIP_FORMAT", raising=False)
+        seen = {}
+        fmt = clip_formats.get("gaming_stack")
+        monkeypatch.setattr(fmt, "render", lambda *a, **kw: seen.update(kw) or True)
+        monkeypatch.setattr(reframe_v2, "render",
+                            lambda *a, **kw: pytest.fail("the job's format was ignored"))
+        assert main.render_clip(str(tmp_path / "in.mp4"), str(tmp_path / "out.mp4"), "auto",
+                                clip_format="gaming_stack", facecam_box=[0, 0.5, 0.3, 0.4])
+        assert seen["facecam_box"] == [0, 0.5, 0.3, 0.4]
+
+
+class TestServerWideFormat:
+    def _submit(self, app_module, monkeypatch, tmp_path, body):
+        TestAppClipFormat()._stub_submit(app_module, monkeypatch, tmp_path)
+        resp = TestAppClipFormat()._post(app_module, json_body=dict(
+            {"url": "https://www.youtube.com/watch?v=abc", "acknowledged": True}, **body))
+        assert resp.status_code == 200, resp.text
+        return app_module.jobs.pop(resp.json()["job_id"])["env"]
+
+    def test_a_request_can_turn_off_a_server_wide_format(self, monkeypatch, tmp_path):
+        app_module = pytest.importorskip("app")
+        monkeypatch.setenv("CLIP_FORMAT", "gaming_stack")
+        monkeypatch.setenv("GAMING_FACECAM_BOX", "0,0.5,0.3,0.4")
+        env = self._submit(app_module, monkeypatch, tmp_path, {"clip_format": "default"})
+        assert env["CLIP_FORMAT"] == "default"
+        assert "GAMING_FACECAM_BOX" not in env
+
+    def test_a_requested_format_does_not_inherit_the_server_box(self, monkeypatch, tmp_path):
+        app_module = pytest.importorskip("app")
+        monkeypatch.setenv("GAMING_FACECAM_BOX", "0,0.5,0.3,0.4")
+        env = self._submit(app_module, monkeypatch, tmp_path, {"clip_format": "gaming_stack"})
+        assert env["CLIP_FORMAT"] == "gaming_stack"
+        assert "GAMING_FACECAM_BOX" not in env
+
+    def test_without_a_requested_format_the_server_default_applies(self, monkeypatch, tmp_path):
+        app_module = pytest.importorskip("app")
+        monkeypatch.setenv("CLIP_FORMAT", "gaming_stack")
+        monkeypatch.setenv("GAMING_FACECAM_BOX", "0,0.5,0.3,0.4")
+        env = self._submit(app_module, monkeypatch, tmp_path, {})
+        assert env["CLIP_FORMAT"] == "gaming_stack"
+        assert env["GAMING_FACECAM_BOX"] == "0,0.5,0.3,0.4"
