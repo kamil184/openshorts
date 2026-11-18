@@ -10,6 +10,8 @@ services:
       - output:/app/output
       - uploads:/app/uploads
       - models:/app/.cache/huggingface
+      # Job presets (PRESETS_DIR) live outside the checkout, like the secrets.
+      - ${OPENSHORTS_PRESETS_DIR:-./presets.example}:/app/presets:ro
     mem_limit: 6g
     memswap_limit: 6g
     cpus: 6.0
@@ -19,6 +21,7 @@ services:
       - path: ${OPENSHORTS_SECRETS_FILE:-/dev/null}
         required: false
     environment:
+      PRESETS_DIR: /app/presets
       TRANSCRIBE_BACKEND: parakeet
       PARAKEET_QUANTIZATION: int8
       LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
