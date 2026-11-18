@@ -118,8 +118,11 @@ def _listed_modalities() -> dict:
     try:
         with _client() as client:
             resp = client.get(f"{base_url()}/models", headers=_headers(), timeout=30.0)
-        if resp.status_code >= 400:
+        if resp.status_code >= 500:
             raise ValueError(f"HTTP {resp.status_code}")
+        if resp.status_code >= 400:
+            # The server offers no model list: a permanent answer, cached as empty.
+            raise _NoModelList(f"HTTP {resp.status_code}")
         body = resp.json()
         if not isinstance(body, dict):
             raise ValueError("model list is not a JSON object")
@@ -127,12 +130,20 @@ def _listed_modalities() -> dict:
             mods = (entry.get("architecture") or {}).get("input_modalities")
             if entry.get("id") and mods:
                 listed[entry["id"]] = frozenset(map(str, mods))
+    except _NoModelList as e:
+        print(f"   ℹ️ Could not read the model list from {base_url()}: {e}")
+        _modalities_cache = {}
+        return {}
     except (httpx.HTTPError, ValueError) as e:
         # Not cached: the next call retries instead of treating every model as text-only.
         print(f"   ℹ️ Could not read the model list from {base_url()}: {e}")
         return {}
     _modalities_cache = listed
     return _modalities_cache
+
+
+class _NoModelList(Exception):
+    """The server answered 4xx for the model list: nothing to retry."""
 
 
 def input_modalities(model: str) -> frozenset:

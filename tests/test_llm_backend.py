@@ -166,6 +166,22 @@ def test_a_failed_model_list_is_retried_on_the_next_call(local, monkeypatch):
     assert calls["n"] == 2
 
 
+def test_a_server_without_a_model_list_is_asked_only_once(local, monkeypatch):
+    calls = {"n": 0}
+
+    def route(request):
+        if request.url.path.endswith("/models"):
+            calls["n"] += 1
+            return httpx.Response(404, json={"error": {"message": "not found"}})
+        return _completion({})
+
+    monkeypatch.setattr(llm_openai, "_client",
+                        lambda **kw: httpx.Client(transport=httpx.MockTransport(route), **kw))
+    assert llm_backend.input_modalities("meta/muse-ember") == {"text"}
+    assert llm_backend.input_modalities("meta/muse-ember") == {"text"}
+    assert calls["n"] == 1
+
+
 def test_a_successful_model_list_is_fetched_once(local, monkeypatch):
     calls = {"n": 0}
 
