@@ -36,8 +36,9 @@ The recut and the editor's re-render pass the same band, but only when captions 
 ## Hook grounding for on-screen clips (`hook_grounding.py`)
 
 The hook and title come from the detail pass, which only reads the transcript, so on a clip whose meaning is on screen they summarise the video's topic instead of naming what is shown.
-After the render, if the `<clip>.layout.json` sidecar says at least 25% of the clip is `screencast` / `wide` / `inset` (plus `general` when the layout picker called the video a screencast), three frames from those stretches at 1024px plus the clip's own words go to the vision model (`prompts.GroundedHook`) and `viral_hook_text` / `video_title_for_youtube_short` are rewritten in place before `auto_hook_clip` burns them; the originals stay under `hook_grounding.before`.
+After the render, if the `<clip>.layout.json` sidecar says at least 25% of the clip is `screencast` / `wide` / `inset` / `stack` (the gaming stack, whose gameplay band is most of the frame; plus `general` when the layout picker called the video a screencast), three frames from those stretches at 1024px plus the clip's own words go to the vision model (`prompts.GroundedHook`) and `viral_hook_text` / `video_title_for_youtube_short` are rewritten in place before `auto_hook_clip` burns them; the originals stay under `hook_grounding.before`.
 The configured vision model must accept images; otherwise it logs one line and keeps the transcript hook.
+A campaign preset's caption rules (language, required mention) go into that prompt as they do for the selection, and a rewritten title that drops a required mention the old title had is not taken.
 `HOOK_GROUNDING=0` disables it.
 The detail prompt also carries the rule "about this moment, not the video".
 

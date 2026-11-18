@@ -3081,7 +3081,8 @@ if __name__ == '__main__':
                     # render put this clip's meaning on the screen, rewrite hook
                     # and title from three of its frames BEFORE burning them.
                     if success and hook_grounding.wanted(clip['layout_ranges'], end - start):
-                        hook_grounding.reground(clip_final_path, clip, transcript, start, end)
+                        hook_grounding.reground(clip_final_path, clip, transcript, start, end,
+                                                preset=presets.job_preset())
                     captioned = None
                     # Pro mode replaces the file the hook and the captions go
                     # on, and the timeline they are laid on (its cuts); the

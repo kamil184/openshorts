@@ -114,7 +114,7 @@ CURRENT_HOOK (to replace): {current_hook}
 CURRENT_TITLE (to replace): {current_title}
 TRANSCRIPT:
 {transcript}
-
+{caption_rules}
 Return only:
 {{"on_screen": "<one line>", "viral_hook_text": "<max 10 words>", "video_title_for_youtube_short": "<max 100 chars>"}}
 """

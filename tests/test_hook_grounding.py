@@ -143,4 +143,9 @@ def test_detail_prompt_forbids_topic_summary_hooks():
     assert "ABOUT THIS MOMENT, NOT THE VIDEO" in prompts.DETAIL_PROMPT_TEMPLATE
     assert "{on_screen" not in prompts.DETAIL_PROMPT_TEMPLATE  # no stray placeholders
     prompts.GROUNDED_HOOK_PROMPT.format(
-        language="es", current_hook="a", current_title="b", transcript="c")
+        language="es", current_hook="a", current_title="b", transcript="c", caption_rules="")
+
+
+def test_a_gaming_stack_clip_is_grounded(monkeypatch):
+    monkeypatch.setattr(hg, "screen_video", lambda: False)
+    assert hg.wanted([{"start": 0, "end": 30, "layout": "stack", "seam": 0.3}], 30) is True

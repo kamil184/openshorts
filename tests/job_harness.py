@@ -57,11 +57,13 @@ def detail_clip(**fields):
 
 
 class FakeModel:
-    """OpenAI-compatible endpoint: 404 for the model list, canned JSON for
-    the scoring and detail passes."""
+    """OpenAI-compatible endpoint with canned JSON for the scoring and detail
+    passes. The model list is 404 (text only) unless ``grounded`` is given:
+    then the model takes images and answers hook grounding with it."""
 
-    def __init__(self, shorts):
+    def __init__(self, shorts, grounded=None):
         self.shorts = shorts
+        self.grounded = grounded
         self.prompts = []
         outer = self
 
@@ -78,7 +80,11 @@ class FakeModel:
                 self.wfile.write(body)
 
             def do_GET(self):
-                self._send(404, {"error": {"message": "no model list"}})
+                if outer.grounded is None:
+                    self._send(404, {"error": {"message": "no model list"}})
+                    return
+                self._send(200, {"data": [{"id": "fake-model", "architecture": {
+                    "input_modalities": ["text", "image"]}}]})
 
             def do_POST(self):
                 raw = self.rfile.read(int(self.headers.get("content-length") or 0))
@@ -93,6 +99,8 @@ class FakeModel:
                 outer.prompts.append(text)
                 if "CANDIDATE_WINDOWS_JSON:" in text:
                     content = {"shorts": outer.shorts}
+                elif "`on_screen`" in text and outer.grounded is not None:
+                    content = outer.grounded
                 else:
                     content = {"windows": [{"id": "window_001", "start": 0, "end": DURATION,
                                             "score": 90, "reason": "r"}]}

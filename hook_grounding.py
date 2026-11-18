@@ -2,7 +2,8 @@
 
 The moment picker chooses clips and writes their hook from the transcript
 alone; it never sees a frame. On a talking head that is fine. On a clip the
-reframe rendered as SCREENCAST / WIDE / INSET the meaning is on the screen
+reframe rendered as SCREENCAST / WIDE / INSET (or the gaming STACK, whose
+gameplay band is most of the frame) the meaning is on the screen
 (a settings dialog, a spreadsheet, a terminal) and the hook comes out as a
 summary of the video's topic ("I automated my clips with AI") while the
 viewer is watching an MCP connector being configured.
@@ -23,7 +24,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
-SCREEN_LAYOUTS = {"screencast", "wide", "inset"}
+SCREEN_LAYOUTS = {"screencast", "wide", "inset", "stack"}
 FRAMES = int(os.environ.get("HOOK_GROUNDING_FRAMES", "3"))
 WIDTH = int(os.environ.get("HOOK_GROUNDING_WIDTH", "1024"))
 # Ignore a blip: the screen stretches must cover this share of the clip.
@@ -130,10 +131,19 @@ def _ask_model(frames, prompt, model_name):
     return answer
 
 
-def reground(clip_path, clip, transcript, start, end) -> Optional[dict]:
+def _mentions(text, names) -> bool:
+    import presets
+    return any(presets._contains_token(text or "", n) for n in names)
+
+
+def reground(clip_path, clip, transcript, start, end, preset=None) -> Optional[dict]:
     """Rewrite ``clip['viral_hook_text']`` / ``video_title_for_youtube_short``
     in place from the clip's frames. Returns what changed (also stored under
-    ``clip['hook_grounding']``), or None when skipped or failed."""
+    ``clip['hook_grounding']``), or None when skipped or failed.
+
+    ``preset``: the job's campaign preset; its caption rules (language,
+    required mention) go into the prompt like they do for the selection, and
+    a new title that drops a required mention the old one had is not taken."""
     try:
         import llm_backend
         model_name = llm_backend.image_model()
@@ -147,12 +157,15 @@ def reground(clip_path, clip, transcript, start, end) -> Optional[dict]:
         frames = frames_at(clip_path, times)
         if not frames:
             return None
+        import presets
         language = str((transcript or {}).get("language") or "unknown")
+        rules = presets.caption_rules_prompt(preset)
         prompt = prompts.GROUNDED_HOOK_PROMPT.format(
             language=language,
             current_hook=clip.get("viral_hook_text") or "",
             current_title=clip.get("video_title_for_youtube_short") or "",
-            transcript=clip_words(transcript, start, end)[:4000] or "(no speech)")
+            transcript=clip_words(transcript, start, end)[:4000] or "(no speech)",
+            caption_rules=f"\n{rules}\n" if rules else "")
         answer = _ask_model(frames, prompt, model_name)
         hook = str(answer.get("viral_hook_text") or "").strip()
         title = str(answer.get("video_title_for_youtube_short") or "").strip()
@@ -161,6 +174,11 @@ def reground(clip_path, clip, transcript, start, end) -> Optional[dict]:
         before = {"viral_hook_text": clip.get("viral_hook_text"),
                   "video_title_for_youtube_short": clip.get("video_title_for_youtube_short")}
         clip["viral_hook_text"] = hook
+        mentions = ((preset or {}).get("captions") or {}).get("mention_one_of") or []
+        if title and mentions and not _mentions(title, mentions) \
+                and _mentions(before["video_title_for_youtube_short"], mentions):
+            print("   🪝 Grounded title dropped the required mention; keeping the old title.")
+            title = ""
         if title:
             clip["video_title_for_youtube_short"] = title[:100]
         clip["hook_grounding"] = {

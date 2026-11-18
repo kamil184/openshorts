@@ -67,3 +67,31 @@ def test_the_job_records_its_clip_format_for_later_renders(model, tmp_path):
     meta = jh.metadata(out)
     assert meta["clip_format"] == "gaming_stack"
     assert meta["facecam_box"] == [0.0, 0.5, 0.3, 0.4]
+
+
+def test_hook_grounding_on_a_gaming_stack_follows_the_preset(tmp_path):
+    preset = presets.validate_preset({"captions": {
+        "language": "en", "required_tags": ["#tag1"], "mention_one_of": ["CreatorOne"]}})
+    model = jh.FakeModel(
+        [jh.detail_clip(end=13.0, video_title_for_youtube_short="CreatorOne big round")],
+        grounded={"on_screen": "a storm circle closing",
+                  "viral_hook_text": "Der Sturm schliesst sich",
+                  "video_title_for_youtube_short": "Der letzte Kreis"})
+    try:
+        env = jh.job_env(model, CLIP_FORMAT="gaming_stack", GAMING_FACECAM_BOX="0,0.5,0.3,0.4",
+                         CLIP_PRESET_JSON=presets.preset_to_json(preset))
+        proc, out = jh.start_job(tmp_path, env, output_format="vertical")
+        log = "\n".join(_lines(proc))
+        assert proc.wait(timeout=600) == 0, log
+    finally:
+        model.close()
+    grounding = [p for p in model.prompts if "`on_screen`" in p]
+    assert grounding, log
+    assert "MUST be written in en" in grounding[0]
+    assert "CreatorOne" in grounding[0]
+    clip = jh.metadata(out)["shorts"][0]
+    assert clip["viral_hook_text"] == "Der Sturm schliesst sich"
+    # The rewritten title dropped the required mention: the old one stays.
+    assert clip["video_title_for_youtube_short"] == "CreatorOne big round"
+    assert "caption_issues" not in clip or not any(
+        "video_title_for_youtube_short" in i for i in clip["caption_issues"])
