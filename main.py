@@ -1452,15 +1452,15 @@ def auto_hook_clip(clip_path, clip, captions=None, mark=False):
     text = (clip.get('viral_hook_text') or '').strip()
     if not text:
         return None
-    style = os.environ.get("AUTO_HOOK_STYLE", "pill")
+    style = os.environ.get("AUTO_HOOK_STYLE", "headline")
     try:
-        seconds = float(os.environ.get("AUTO_HOOK_SECONDS", "5"))
+        seconds = float(os.environ.get("AUTO_HOOK_SECONDS", "2.5"))
     except ValueError:
-        seconds = 5.0
+        seconds = 2.5
     try:
         from hooks import add_hook_to_video, HOOK_STYLES
         if style not in HOOK_STYLES:
-            style = "pill"
+            style = "headline"
         output_dir = os.path.dirname(clip_path)
         out_path = os.path.join(
             output_dir, f"hooked_{int(time.time())}_{os.path.basename(clip_path)}")
@@ -1537,9 +1537,9 @@ def pro_clip(clip_path, clip, transcript):
     hook_seconds = 0.0
     if os.environ.get("AUTO_HOOK") == "1" and (clip.get('viral_hook_text') or '').strip():
         try:
-            hook_seconds = float(os.environ.get("AUTO_HOOK_SECONDS", "5"))
+            hook_seconds = float(os.environ.get("AUTO_HOOK_SECONDS", "2.5"))
         except ValueError:
-            hook_seconds = 5.0
+            hook_seconds = 2.5
     try:
         out_name, updates = pro_mode.convert(
             clip_path, os.path.basename(clip_path), clip, transcript, wait=wait,

@@ -29,15 +29,21 @@ FONT_DIR = "fonts"
 FONT_PATH = os.path.join(FONT_DIR, "NotoSerif-Bold.ttf")
 # Bundled (SIL OFL, see fonts/Montserrat-OFL.txt): the "pill" look's sans.
 PILL_FONT_PATH = os.path.join(FONT_DIR, "Montserrat-ExtraBold.ttf")
+# Bundled (SIL OFL, see fonts/BarlowCondensed-OFL.txt): the "headline" look's condensed face.
+CONDENSED_FONT_PATH = os.path.join(FONT_DIR, "BarlowCondensed-ExtraBold.ttf")
 
 # Typefaces the hook editor offers, all bundled so the server render and the
 # browser preview use the same file. The size factor (share of the box width)
-# evens out their visual weight: Anton is condensed, Montserrat wide.
+# evens out their visual weight: Anton/Barlow are condensed, Montserrat wide.
 HOOK_FONTS = {
     "montserrat": (PILL_FONT_PATH, 0.064),
     "anton": (os.path.join(FONT_DIR, "Anton-Regular.ttf"), 0.08),
+    "condensed": (CONDENSED_FONT_PATH, 0.08),
     "serif": (FONT_PATH, 0.05),
 }
+
+_CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
+_LATIN_ONLY_HOOK_FONTS = {"condensed", "anton"}
 
 # Codepoint ranges NotoSerif has no glyphs for (would render as tofu boxes).
 _EMOJI_RE = re.compile(
@@ -205,7 +211,12 @@ def download_font_if_needed():
 # Hook visual styles. Each maps to box fill (RGBA, alpha 0 = no box), text
 # color, and an optional text outline (color, px) for box-less looks.
 HOOK_STYLES = {
-    # Default. TikTok-native look: every line its own white rounded box,
+    # Default. Box-free condensed uppercase headline with thin outline, soft
+    # blurred shadow, and key words highlighted in yellow (#FFE500).
+    "headline": {"box": (0, 0, 0, 0),      "text": (255, 255, 255), "accent": (255, 229, 0),
+                 "outline": ((10, 12, 18), 7), "shadow": True, "uppercase": True,
+                 "font": CONDENSED_FONT_PATH},
+    # TikTok-native look: every line its own white rounded box,
     # black bold sans (Montserrat ExtraBold).
     "pill":    {"box": (255, 255, 255, 250), "text": (0, 0, 0), "outline": None, "shadow": False,
                 "font": PILL_FONT_PATH, "pills": True},
@@ -222,6 +233,157 @@ HOOK_STYLES = {
     # No box: yellow text with black outline.
     "outline_yellow": {"box": (0, 0, 0, 0),  "text": (255, 214, 0),   "outline": ((0, 0, 0), 8), "shadow": False},
 }
+
+_STYLE_FONT_KEY = {
+    PILL_FONT_PATH: "montserrat",
+    CONDENSED_FONT_PATH: "condensed",
+}
+
+_ACCENT_SPAN_RE = re.compile(r"\*([^\s*](?:[^*]*[^\s*])?)\*")
+_NUMBER_WORDS = {
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "eleven", "twelve", "twenty", "thirty", "forty", "fifty",
+    "hundred", "thousand", "million", "billion", "first", "second", "third",
+    "double", "triple", "ноль", "один", "одна", "два", "две", "три", "четыре",
+    "пять", "шесть", "семь", "восемь", "девять", "десять", "сто", "тысяча",
+    "чотири", "п'ять", "тисяча",
+}
+_HOOK_STOPWORDS = {
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+    "to", "of", "in", "on", "at", "for", "with", "by", "from", "that", "this",
+    "these", "those", "it", "its", "he", "she", "they", "we", "you", "i",
+    "me", "my", "your", "his", "her", "their", "our", "as", "so", "and", "or",
+    "but", "if", "not", "no", "did", "do", "does", "have", "has", "had",
+    "got", "get", "somehow", "actually", "literally", "really", "just",
+    "wait", "until", "when", "why", "how", "what", "who", "all", "about",
+    "into", "over", "out", "up", "even", "only", "very", "more", "most",
+    "than", "then", "there", "here", "can", "will", "would", "could", "should",
+    "for", "accident",
+}
+
+
+def _clean_hook_token(word):
+    return re.sub(r"[^a-zA-Zа-яА-ЯёЁіІїЇєЄ0-9]", "", word).lower()
+
+
+def _is_number_token(word):
+    if any(ch.isdigit() for ch in word):
+        return True
+    return _clean_hook_token(word) in _NUMBER_WORDS
+
+
+def _uppercase_preserve_emoji(text):
+    return "".join(chunk if is_e else chunk.upper() for is_e, chunk in _split_emoji_runs(text))
+
+
+def _parse_hook_paragraphs(text, accent_auto=False, uppercase=False):
+    """Split hook text into paragraphs of (word, is_accent) tokens.
+
+    Explicit *word* / *two words* spans win; otherwise, when accent_auto is
+    enabled, highlights digits/number phrases or 1-2 punchy content words.
+    """
+    paragraphs = []
+    has_explicit = False
+
+    for raw_para in text.split("\n"):
+        if not raw_para.strip():
+            paragraphs.append([])
+            continue
+
+        tokens = []
+        pos = 0
+        for m in _ACCENT_SPAN_RE.finditer(raw_para):
+            if m.start() > pos:
+                before = raw_para[pos:m.start()]
+                if before and not before[0].isspace() and tokens:
+                    # Punctuation attached to the preceding explicit span
+                    head, _, rest = before.partition(" ")
+                    prev_w, prev_acc = tokens[-1]
+                    tokens[-1] = (prev_w + head, prev_acc)
+                    before = rest
+                for w in before.split():
+                    tokens.append((w, False))
+            has_explicit = True
+            for w in m.group(1).split():
+                tokens.append((w, True))
+            pos = m.end()
+        if pos < len(raw_para):
+            tail = raw_para[pos:]
+            if tail and not tail[0].isspace() and tokens and pos > 0:
+                head, _, rest = tail.partition(" ")
+                prev_w, prev_acc = tokens[-1]
+                tokens[-1] = (prev_w + head, prev_acc)
+                tail = rest
+            for w in tail.split():
+                tokens.append((w, False))
+        paragraphs.append(tokens)
+
+    if accent_auto and not has_explicit:
+        flat = [(pi, wi, w) for pi, p in enumerate(paragraphs) for wi, (w, _) in enumerate(p)]
+        if flat:
+            chosen = set()
+            # 1) Number token + following non-stopword (e.g. "four bows", "97%").
+            for idx, (pi, wi, w) in enumerate(flat):
+                if _is_number_token(w):
+                    chosen.add((pi, wi))
+                    if idx + 1 < len(flat) and flat[idx + 1][0] == pi:
+                        nw = flat[idx + 1][2]
+                        nclean = _clean_hook_token(nw)
+                        if nclean and nclean not in _HOOK_STOPWORDS and len(nclean) >= 2:
+                            chosen.add((pi, flat[idx + 1][1]))
+                    break
+
+            # 2) Mixed-case input with explicit ALL-CAPS words (not all words caps).
+            if not chosen:
+                alphas = [(pi, wi, w) for pi, wi, w in flat
+                          if sum(c.isalpha() for c in w) >= 2]
+                caps = [(pi, wi, w) for pi, wi, w in alphas
+                        if w == w.upper() and w != w.lower()
+                        and _clean_hook_token(w) not in {"pov", "ai", "pc", "tv", "ok", "fps"}]
+                if caps and len(caps) < len(alphas):
+                    first_pos = flat.index(caps[0])
+                    chosen.add((caps[0][0], caps[0][1]))
+                    if (first_pos + 1 < len(flat) and flat[first_pos + 1] in caps
+                            and flat[first_pos + 1][0] == caps[0][0]):
+                        chosen.add((flat[first_pos + 1][0], flat[first_pos + 1][1]))
+
+            # 3) Fallback: 1-2 late punchy content words (longest near end).
+            if not chosen:
+                candidates = []
+                n_all = len(flat)
+                for idx, (pi, wi, w) in enumerate(flat):
+                    clean = _clean_hook_token(w)
+                    if not clean or clean in _HOOK_STOPWORDS:
+                        continue
+                    # Prefer second half of the hook + longer content words.
+                    score = len(clean) + (3 if idx >= n_all // 2 else 0)
+                    candidates.append((score, idx, pi, wi))
+                if not candidates:
+                    best_idx = max(0, len(flat) - 1)
+                    chosen.add((flat[best_idx][0], flat[best_idx][1]))
+                else:
+                    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                    _, bidx, bpi, bwi = candidates[0]
+                    chosen.add((bpi, bwi))
+                    if n_all >= 4:
+                        for adj in (bidx + 1, bidx - 1):
+                            if 0 <= adj < n_all and flat[adj][0] == bpi:
+                                aclean = _clean_hook_token(flat[adj][2])
+                                if aclean and aclean not in _HOOK_STOPWORDS:
+                                    chosen.add((flat[adj][0], flat[adj][1]))
+                                    break
+
+            paragraphs = [
+                [(w, (pi, wi) in chosen) for wi, (w, _) in enumerate(p)]
+                for pi, p in enumerate(paragraphs)
+            ]
+
+    if uppercase:
+        paragraphs = [
+            [(_uppercase_preserve_emoji(w), acc) for w, acc in p]
+            for p in paragraphs
+        ]
+    return paragraphs
 
 
 def _draw_pills(lines, font, emoji_font, font_size, box_fill, text_fill, output_image_path):
@@ -254,39 +416,77 @@ def _draw_pills(lines, font, emoji_font, font_size, box_fill, text_fill, output_
     return output_image_path, canvas_w, canvas_h
 
 
-def create_hook_image(text, target_width, output_image_path="hook_overlay.png", font_scale=1.0, style="pill",
+def _merge_line_segments(word_tokens, text_fill, accent_fill):
+    """Merge adjacent (word, is_accent) tokens in a line into (text, color) runs."""
+    runs = []
+    for idx, (word, is_accent) in enumerate(word_tokens):
+        chunk = word if idx == 0 else " " + word
+        color = accent_fill if (is_accent and accent_fill) else text_fill
+        if runs and runs[-1][1] == color:
+            runs[-1] = (runs[-1][0] + chunk, color)
+        else:
+            runs.append((chunk, color))
+    return runs
+
+
+def _draw_line_segments(img, draw, xy, segments, font, emoji_font, outline=None):
+    """Draw multi-color (text, fill) segments on one line cleanly."""
+    if outline:
+        stroke_fill, stroke_w = outline
+        x, y = xy
+        for txt, fill in segments:
+            for is_emoji, chunk in _split_emoji_runs(txt):
+                if is_emoji and emoji_font:
+                    x += draw.textlength(chunk, font=emoji_font[0]) * _emoji_scale(font, emoji_font)
+                else:
+                    draw.text((x, y), chunk, font=font, fill=fill,
+                              stroke_width=stroke_w, stroke_fill=stroke_fill)
+                    x += draw.textlength(chunk, font=font)
+    x, y = xy
+    for txt, fill in segments:
+        _draw_mixed(img, draw, (x, y), txt, font, emoji_font, fill=fill, outline=None)
+        x += _measure_width(draw, txt, font, emoji_font)
+
+
+def create_hook_image(text, target_width, output_image_path="hook_overlay.png", font_scale=1.0, style="headline",
                       font=None):
     """
     Generates a hook overlay image using pixel-based wrapping.
     target_width: The max width the box should occupy (e.g. 85% of video)
-    style: one of HOOK_STYLES (pill/classic/dark/yellow/red/outline/outline_yellow)
+    style: one of HOOK_STYLES (headline/pill/classic/dark/yellow/red/outline/outline_yellow)
     """
     download_font_if_needed()
 
-    look = HOOK_STYLES.get(style, HOOK_STYLES["pill"])
+    look = HOOK_STYLES.get(style, HOOK_STYLES["headline"])
     box_fill = look["box"]
     text_fill = look["text"]
+    accent_fill = look.get("accent")
     outline = look["outline"]
     has_box = box_fill[3] > 0
     draw_shadow = look["shadow"]
-    
+    use_uppercase = bool(look.get("uppercase"))
+
     # Configuration
     padding_x = 30 # Balanced padding
-    padding_y = 25 
+    padding_y = 25
     line_spacing = 20 # Increased spacing
     cornerradius = 20
-    shadow_offset = (5, 5) 
-    shadow_blur = 10
-    
+    shadow_offset = (5, 5)
+
     # Font Size Calculation (approx 5% of width - tuned to match Noto Serif Bold metrics in browser)
     pills = bool(look.get("pills"))
-    # A chosen typeface (HOOK_FONTS key) wins; otherwise the style's own
-    # (pill -> Montserrat, the rest -> Noto Serif, as they always rendered).
-    default_font = "montserrat" if look.get("font") == PILL_FONT_PATH else "serif"
-    font_path, size_factor = HOOK_FONTS.get(font or default_font, HOOK_FONTS[default_font])
+    # A chosen typeface (HOOK_FONTS key) wins; otherwise the style's own.
+    default_font = _STYLE_FONT_KEY.get(look.get("font"), "serif")
+    chosen_font_key = font or default_font
+    if _CYRILLIC_RE.search(text) and chosen_font_key in _LATIN_ONLY_HOOK_FONTS:
+        chosen_font_key = "montserrat"
+    font_path, size_factor = HOOK_FONTS.get(chosen_font_key, HOOK_FONTS[default_font])
     base_font_size = int(target_width * size_factor)
     font_size = int(base_font_size * font_scale)
-    
+
+    if outline and look.get("font") == CONDENSED_FONT_PATH:
+        outline = (outline[0], max(3, round(outline[1] * font_size / 76.0)))
+
     try:
         font = ImageFont.truetype(font_path, font_size)
     except Exception as e:
@@ -308,47 +508,87 @@ def create_hook_image(text, target_width, output_image_path="hook_overlay.png", 
 
     max_text_width = target_width - (2 * padding_x)
 
-    # Handle manual newlines first
-    paragraphs = text.split('\n')
-    lines = []
+    parsed_paragraphs = _parse_hook_paragraphs(
+        text, accent_auto=bool(accent_fill), uppercase=use_uppercase)
+    wrapped_lines = []  # list[list[(word, is_accent)]]
 
-    for p in paragraphs:
-        if not p.strip():
-            lines.append("")
+    for words in parsed_paragraphs:
+        if not words:
+            wrapped_lines.append([])
             continue
 
-        words = p.split()
         current_line = []
 
-        for word in words:
-            # Test if adding word fits
-            test_line = ' '.join(current_line + [word])
+        for word, is_accent in words:
+            test_line = ' '.join([w for w, _ in current_line] + [word])
             w = _measure_width(draw, test_line, font, emoji_font)
 
             if w <= max_text_width:
-                current_line.append(word)
+                current_line.append((word, is_accent))
                 continue
 
-            # Word doesn't fit on the current line
             if current_line:
-                lines.append(' '.join(current_line))
+                wrapped_lines.append(current_line)
                 current_line = []
 
             if _measure_width(draw, word, font, emoji_font) <= max_text_width:
-                current_line = [word]
+                current_line = [(word, is_accent)]
             else:
-                # Single word wider than the box: hard-wrap it character-wise
-                # so it can't get cut off at the edges.
                 pieces = _break_long_word(draw, word, font, emoji_font, max_text_width)
-                lines.extend(pieces[:-1])
-                current_line = [pieces[-1]] if pieces else []
+                for p in pieces[:-1]:
+                    wrapped_lines.append([(p, is_accent)])
+                current_line = [(pieces[-1], is_accent)] if pieces else []
 
         if current_line:
-            lines.append(' '.join(current_line))
+            wrapped_lines.append(current_line)
 
     if pills:
-        return _draw_pills(lines, font, emoji_font, font_size, box_fill, text_fill,
+        plain_lines = [' '.join(w for w, _ in ln) for ln in wrapped_lines]
+        return _draw_pills(plain_lines, font, emoji_font, font_size, box_fill, text_fill,
                            output_image_path)
+
+    # Boxless headline with soft blurred drop shadow + outline.
+    if not has_box and draw_shadow:
+        top, bottom = draw.textbbox((0, 0), "ÁÉgjpqy!", font=font)[1::2]
+        line_h = (bottom - top) + 18
+        line_segments = [_merge_line_segments(ln, text_fill, accent_fill) for ln in wrapped_lines]
+        line_widths = [
+            int(_measure_width(draw, ' '.join(w for w, _ in ln), font, emoji_font)) if ln else 0
+            for ln in wrapped_lines
+        ]
+        max_w = max(line_widths) if line_widths else 0
+        canvas_w = max(max_w + 80, int(target_width * 0.3))
+        canvas_h = max(line_h, line_h * len(wrapped_lines)) + 60
+
+        img = Image.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))
+        sh_draw = ImageDraw.Draw(img)
+        sh_stroke = (outline[1] + 1) if outline else 0
+        for i, (segs, lw) in enumerate(zip(line_segments, line_widths)):
+            if not segs:
+                continue
+            cx = (canvas_w - lw) // 2
+            cy = 24 + i * line_h - top
+            for txt, _ in segs:
+                for is_emoji, chunk in _split_emoji_runs(txt):
+                    if is_emoji and emoji_font:
+                        cx += sh_draw.textlength(chunk, font=emoji_font[0]) * _emoji_scale(font, emoji_font)
+                    else:
+                        sh_draw.text((cx + 3, cy + 6), chunk, font=font,
+                                     fill=(0, 0, 0, 210), stroke_width=sh_stroke,
+                                     stroke_fill=(0, 0, 0, 210))
+                        cx += sh_draw.textlength(chunk, font=font)
+        img = img.filter(ImageFilter.GaussianBlur(6))
+        draw_final = ImageDraw.Draw(img)
+        for i, (segs, lw) in enumerate(zip(line_segments, line_widths)):
+            if not segs:
+                continue
+            cx = (canvas_w - lw) // 2
+            cy = 24 + i * line_h - top
+            _draw_line_segments(img, draw_final, (cx, cy), segs, font, emoji_font, outline=outline)
+        img.save(output_image_path)
+        return output_image_path, canvas_w, canvas_h
+
+    lines = [' '.join(w for w, _ in ln) for ln in wrapped_lines]
 
     # Recalculate true width/height
     max_line_width = 0
@@ -364,25 +604,25 @@ def create_hook_image(text, target_width, output_image_path="hook_overlay.png", 
         h = bbox[3] - bbox[1]
         max_line_width = max(max_line_width, int(w))
         text_heights.append(h)
-    
+
     # Box dimensions
     # We want the box to fit the text exactly + padding
     # Ensure min width for aesthetic reasons if text is short (at least 30% of target)
     box_width = max(max_line_width + (2 * padding_x), int(target_width * 0.3))
-    
+
     # Total Text Height: sum(heights) + spacing * (n-1)
     if not text_heights:
          total_text_height = font_size
     else:
          total_text_height = sum(text_heights) + (len(text_heights) - 1) * line_spacing
-         
+
     box_height = total_text_height + (2 * padding_y)
-    
+
     # Create Final Image with Rounded Corners and Shadow
     # 1. Canvas for Shadow (larger than box)
     canvas_w = box_width + 40
     canvas_h = box_height + 40
-    
+
     img = Image.new('RGBA', (canvas_w, canvas_h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
@@ -425,7 +665,7 @@ def create_hook_image(text, target_width, output_image_path="hook_overlay.png", 
                     fill=text_fill, outline=outline)
 
         current_y += line_h + line_spacing
-        
+
     img.save(output_image_path)
     return output_image_path, canvas_w, canvas_h
 
@@ -482,7 +722,7 @@ def _auto_place(video_path, text, target_box_width, hook_filename, font_scale, s
             "y": round(y, 3), "scale": rel}
 
 
-def add_hook_to_video(video_path, text, output_path, position="top", font_scale=1.0, duration=None, style="pill",
+def add_hook_to_video(video_path, text, output_path, position="top", font_scale=1.0, duration=None, style="headline",
                       also=None, font=None, layout_ranges=None, has_captions=True,
                       mark=None):
     """

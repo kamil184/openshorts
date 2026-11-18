@@ -48,6 +48,7 @@ export type HookPosition = "auto" | "top" | "center" | "bottom";
 export type HookSize = "S" | "M" | "L";
 export type HookEntrance = "spring" | "fade" | "slide-up" | "none";
 export type HookStyle =
+  | "headline"
   | "pill"
   | "classic"
   | "dark"
@@ -56,14 +57,14 @@ export type HookStyle =
   | "outline"
   | "outline_yellow";
 
-export type HookFont = "montserrat" | "anton" | "serif";
+export type HookFont = "condensed" | "montserrat" | "anton" | "serif";
 
 export interface HookConfig {
   text: string;
   position: HookPosition;
   size: HookSize;
   style?: HookStyle;
-  /** montserrat | anton | serif; unset = the style's own typeface. */
+  /** condensed | montserrat | anton | serif; unset = the style's own typeface. */
   font?: HookFont;
   entranceAnimation: HookEntrance;
   displayDurationSec: number;
@@ -127,9 +128,9 @@ export const hookConfigSchema = z.object({
   position: z.enum(["auto", "top", "center", "bottom"]),
   size: z.enum(["S", "M", "L"]),
   style: z
-    .enum(["pill", "classic", "dark", "yellow", "red", "outline", "outline_yellow"])
-    .default("pill"),
-  font: z.enum(["montserrat", "anton", "serif"]).optional(),
+    .enum(["headline", "pill", "classic", "dark", "yellow", "red", "outline", "outline_yellow"])
+    .default("headline"),
+  font: z.enum(["condensed", "montserrat", "anton", "serif"]).optional(),
   entranceAnimation: z.enum(["spring", "fade", "slide-up", "none"]),
   displayDurationSec: z.number().positive(),
 });

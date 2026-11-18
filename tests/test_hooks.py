@@ -61,8 +61,19 @@ class TestHookStyles:
 
     def test_expected_style_names(self):
         assert set(HOOK_STYLES) == {
-            "pill", "classic", "dark", "yellow", "red", "outline", "outline_yellow",
+            "headline", "pill", "classic", "dark", "yellow", "red", "outline", "outline_yellow",
         }
+
+    def test_headline_is_boxless_condensed_with_accent_outline_and_shadow(self):
+        look = HOOK_STYLES["headline"]
+        assert look["box"][3] == 0
+        assert look["shadow"] is True
+        assert look["uppercase"] is True
+        assert look["accent"] == (255, 229, 0)
+        color, px = look["outline"]
+        assert px > 0 and len(color) == 3
+        assert look["font"].endswith("BarlowCondensed-ExtraBold.ttf")
+        assert os.path.exists(look["font"])
 
     def test_pill_is_one_box_per_line_in_the_bundled_sans(self):
         look = HOOK_STYLES["pill"]
@@ -145,3 +156,76 @@ def test_pill_hook_image_stacks_one_box_per_line(tmp_path):
     alpha_rows = [any(img.getpixel((x, y))[3] > 200 for x in range(0, img.width, 4))
                   for y in range(img.height)]
     assert sum(alpha_rows) > 0
+
+
+def test_headline_parses_explicit_stars_and_strips_markers():
+    from hooks import _parse_hook_paragraphs
+    parsed = _parse_hook_paragraphs("He bought *four bows*?!", accent_auto=True, uppercase=True)
+    assert parsed == [[
+        ("HE", False),
+        ("BOUGHT", False),
+        ("FOUR", True),
+        ("BOWS?!", True),
+    ]]
+
+
+def test_headline_auto_highlights_numbers_without_stars():
+    from hooks import _parse_hook_paragraphs
+    parsed = _parse_hook_paragraphs("He somehow bought four bows for free", accent_auto=True, uppercase=True)
+    words = [w for p in parsed for w in p]
+    accented = [w for w, is_acc in words if is_acc]
+    assert accented == ["FOUR", "BOWS"]
+
+
+def test_headline_auto_highlights_punch_word_without_numbers():
+    from hooks import _parse_hook_paragraphs
+    parsed = _parse_hook_paragraphs("Why everyone misses this secret", accent_auto=True, uppercase=True)
+    words = [w for p in parsed for w in p]
+    accented = [w for w, is_acc in words if is_acc]
+    assert 1 <= len(accented) <= 2
+
+
+def test_headline_renders_yellow_pixels_and_cyrillic_fallback(tmp_path):
+    out_en = str(tmp_path / "headline_en.png")
+    path_en, _, _ = create_hook_image("He bought four bows", 972, out_en, style="headline")
+    im = Image.open(path_en).convert("RGBA")
+    px = im.load()
+    has_yellow = any(
+        px[x, y][3] > 200 and px[x, y][0] > 220 and px[x, y][1] > 190 and px[x, y][2] < 80
+        for y in range(0, im.height, 2) for x in range(0, im.width, 2)
+    )
+    assert has_yellow, "headline style must draw accented key words in yellow"
+
+    # Cyrillic falls back to Montserrat ExtraBold without crashing or tofu.
+    out_ru = str(tmp_path / "headline_ru.png")
+    path_ru, w, h = create_hook_image("Он случайно купил *четыре лука*", 972, out_ru, style="headline")
+    assert os.path.exists(path_ru) and w > 0 and h > 0
+
+
+def test_auto_hook_defaults_to_headline_and_2_5s(monkeypatch, tmp_path):
+    import inspect
+    import hooks as hooks_mod
+    import main as main_mod
+
+    assert inspect.signature(hooks_mod.add_hook_to_video).parameters["style"].default == "headline"
+    assert inspect.signature(hooks_mod.create_hook_image).parameters["style"].default == "headline"
+
+    seen = {}
+
+    def fake_add(video_path, text, output_path, **kw):
+        seen.update(kw)
+        with open(output_path, "wb") as f:
+            f.write(b"v")
+        return True
+
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"v")
+    monkeypatch.setattr(hooks_mod, "add_hook_to_video", fake_add)
+    monkeypatch.delenv("AUTO_HOOK_STYLE", raising=False)
+    monkeypatch.delenv("AUTO_HOOK_SECONDS", raising=False)
+
+    res = main_mod.auto_hook_clip(str(clip), {"viral_hook_text": "Watch this"})
+    assert res is not None
+    assert seen["style"] == "headline"
+    assert seen["duration"] == 2.5
+    assert res[1]["duration_seconds"] == 2.5

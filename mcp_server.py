@@ -104,8 +104,8 @@ TOOLS = [
                 },
                 "hook_style": {
                     "type": "string",
-                    "enum": ["pill", "classic", "dark", "yellow", "red", "outline", "outline_yellow"],
-                    "description": "Look of the hook text (with auto_hook). Default pill.",
+                    "enum": ["headline", "pill", "classic", "dark", "yellow", "red", "outline", "outline_yellow"],
+                    "description": "Look of the hook text (with auto_hook). Default headline.",
                 },
                 "captions": {
                     "type": "boolean",

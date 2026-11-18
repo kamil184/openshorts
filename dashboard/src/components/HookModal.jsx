@@ -13,6 +13,7 @@ const ENTRANCE_OPTIONS = [
 
 // Must mirror hooks.py HOOK_STYLES.
 const HOOK_STYLES = [
+    { value: 'headline', label: 'Headline', box: 'transparent', text: '#fff', accent: '#FFE500', outline: true, uppercase: true },
     { value: 'pill', label: 'Pills', box: 'rgba(255,255,255,0.98)', text: '#000', sans: true },
     { value: 'classic', label: 'Classic', box: 'rgba(255,255,255,0.94)', text: '#000' },
     { value: 'dark', label: 'Dark', box: 'rgba(18,18,20,0.92)', text: '#fff' },
@@ -24,17 +25,19 @@ const HOOK_STYLES = [
 
 // Must mirror hooks.py HOOK_FONTS (all bundled: /fonts/*.ttf).
 const FONT_OPTIONS = [
+    { value: 'condensed', label: 'Condensed' },
     { value: 'montserrat', label: 'Montserrat' },
     { value: 'anton', label: 'Anton' },
     { value: 'serif', label: 'Serif' },
 ];
 const FONT_CSS = {
+    condensed: { fontFamily: "'BarlowCondensed-ExtraBold', 'Barlow Condensed', Impact, sans-serif", fontWeight: 800 },
     montserrat: { fontFamily: "'Montserrat-ExtraBold', 'Montserrat', sans-serif", fontWeight: 800 },
     anton: { fontFamily: "'Anton-Regular', Impact, sans-serif", fontWeight: 400 },
     serif: { fontFamily: "'Noto Serif', Georgia, serif", fontWeight: 700 },
 };
 // The style's own typeface when none is picked (what hooks.py renders).
-const styleFont = (st) => (st === 'pill' ? 'montserrat' : 'serif');
+const styleFont = (st) => (st === 'headline' ? 'condensed' : st === 'pill' ? 'montserrat' : 'serif');
 
 // auto: the server keeps the hook off the speaker's face and the captions
 // (hook_placement.py). The preview cannot see faces and draws it at the top.
@@ -64,12 +67,12 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     // 'top' whether or not the user ever touched the control.
     const [position, setPosition] = useState(prefs.pos || 'auto');
     const [size, setSize] = useState(prefs.size || 'M');
-    const [style, setStyle] = useState(prefs.style || 'pill');
+    const [style, setStyle] = useState(prefs.style || 'headline');
     // null = follow the style's own typeface.
     const [font, setFont] = useState(prefs.font || null);
     const effectiveFont = font || styleFont(style);
     const [entranceAnimation, setEntranceAnimation] = useState(prefs.entranceAnimation || 'spring');
-    const [displayDuration, setDisplayDuration] = useState(5);
+    const [displayDuration, setDisplayDuration] = useState(2.5);
 
     if (!isOpen) return null;
 
@@ -104,7 +107,8 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
     };
 
     const pillFontFace = "@font-face{font-family:'Montserrat-ExtraBold';src:url('/fonts/Montserrat-ExtraBold.ttf') format('truetype');font-weight:800;}"
-        + "@font-face{font-family:'Anton-Regular';src:url('/fonts/Anton-Regular.ttf') format('truetype');font-weight:400;}";
+        + "@font-face{font-family:'Anton-Regular';src:url('/fonts/Anton-Regular.ttf') format('truetype');font-weight:400;}"
+        + "@font-face{font-family:'BarlowCondensed-ExtraBold';src:url('/fonts/BarlowCondensed-ExtraBold.ttf') format('truetype');font-weight:800;}";
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} size="lg" eyebrow="EDITOR · HOOK" title="edit hook">
@@ -175,6 +179,16 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                                                 <span className="rounded-md px-1.5 text-[13px] leading-5 bg-white text-black">Aa Bb</span>
                                                 <span className="rounded-md px-1.5 text-[13px] leading-5 bg-white text-black">Cc</span>
                                             </span>
+                                        ) : s.accent ? (
+                                            <span
+                                                className="block rounded-md px-1 py-1.5 text-[15px] leading-5"
+                                                style={{
+                                                    ...FONT_CSS[font || styleFont(s.value)],
+                                                    backgroundColor: s.box,
+                                                    color: s.text,
+                                                    textShadow: '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000',
+                                                }}
+                                            >AA <span style={{ color: s.accent }}>BB</span></span>
                                         ) : (
                                             <span
                                                 className="block rounded-md px-1 py-1.5 text-[15px] leading-5"
@@ -268,8 +282,9 @@ export default function HookModal({ isOpen, onClose, onGenerate, onRemove, isPro
                                 type="range"
                                 min="2"
                                 max="15"
+                                step="0.5"
                                 value={displayDuration}
-                                onChange={(e) => setDisplayDuration(parseInt(e.target.value))}
+                                onChange={(e) => setDisplayDuration(parseFloat(e.target.value))}
                                 className="w-full accent-[var(--color-accent)]"
                             />
                             <div className="flex justify-between">

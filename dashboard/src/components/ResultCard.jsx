@@ -600,7 +600,7 @@ export default function ResultCard({ clip, index, jobId, durable, uploadPostKey,
                     text: payload.text,
                     position: payload.position,
                     size: payload.size,
-                    style: payload.style || 'pill',
+                    style: payload.style || 'headline',
                     font: payload.font || null,
                     duration_seconds: payload.remotion?.displayDurationSec ?? null,
                     input_filename: serverVideoFile

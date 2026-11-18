@@ -12,6 +12,7 @@ import {
   notoSerifFontFace,
   montserratFontFace,
   antonFontFace,
+  barlowCondensedFontFace,
   HOOK_FONTS,
 } from "../lib/fonts";
 
@@ -37,14 +38,19 @@ const POSITION_STYLE: Record<string, React.CSSProperties> = {
 interface HookLook {
   box: string | null;
   text: string;
+  accent?: string;
   outlinePx: number;
+  outlineColor?: string;
   shadow: boolean;
+  uppercase?: boolean;
+  defaultFont?: string;
   /** One rounded box per line (hooks.py _draw_pills) instead of one card. */
   pills?: boolean;
 }
 
 const HOOK_LOOKS: Record<string, HookLook> = {
-  pill: { box: "rgba(255, 255, 255, 0.98)", text: "#000000", outlinePx: 0, shadow: false, pills: true },
+  headline: { box: null, text: "#FFFFFF", accent: "#FFE500", outlinePx: 7, outlineColor: "#0A0C12", shadow: true, uppercase: true, defaultFont: "condensed" },
+  pill: { box: "rgba(255, 255, 255, 0.98)", text: "#000000", outlinePx: 0, shadow: false, pills: true, defaultFont: "montserrat" },
   classic: { box: "rgba(255, 255, 255, 0.94)", text: "#000000", outlinePx: 0, shadow: true },
   dark: { box: "rgba(18, 18, 20, 0.92)", text: "#FFFFFF", outlinePx: 0, shadow: true },
   yellow: { box: "rgba(255, 214, 0, 0.96)", text: "#000000", outlinePx: 0, shadow: true },
@@ -53,13 +59,29 @@ const HOOK_LOOKS: Record<string, HookLook> = {
   outline_yellow: { box: null, text: "#FFD600", outlinePx: 8, shadow: false },
 };
 
+// *word* marks a key word (hooks.py _ACCENT_SPAN_RE): drawn in the accent
+// colour where the style has one, the asterisks dropped everywhere. Words
+// hooks.py picks on its own when there are no asterisks are not previewed.
+const renderHookText = (text: string, accent?: string) => {
+  const parts = text.split(/(\*[^\s*](?:[^*]*[^\s*])?\*)/g);
+  return parts.map((part, idx) =>
+    part.startsWith("*") && part.endsWith("*") && part.length > 2 ? (
+      <span key={idx} style={accent ? { color: accent } : undefined}>
+        {part.slice(1, -1)}
+      </span>
+    ) : (
+      <React.Fragment key={idx}>{part}</React.Fragment>
+    )
+  );
+};
+
 export const HookOverlay: React.FC<HookOverlayProps> = ({ config }) => {
   const { fps } = useVideoConfig();
   const displayFrames = Math.round(config.displayDurationSec * fps);
 
   return (
     <AbsoluteFill>
-      <style>{notoSerifFontFace + montserratFontFace + antonFontFace}</style>
+      <style>{notoSerifFontFace + montserratFontFace + antonFontFace + barlowCondensedFontFace}</style>
       <Sequence from={0} durationInFrames={displayFrames} layout="none">
         <HookBox config={config} displayFrames={displayFrames} />
       </Sequence>
@@ -125,11 +147,11 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
   }
 
   const positionStyle = POSITION_STYLE[config.position] ?? POSITION_STYLE.top;
-  const look = HOOK_LOOKS[config.style ?? "pill"] ?? HOOK_LOOKS.pill;
+  const look = HOOK_LOOKS[config.style ?? "headline"] ?? HOOK_LOOKS.headline;
 
   // Typeface and size as hooks.py: the chosen font, else the style's own;
   // font size = factor x the 90%-of-width box.
-  const typeface = HOOK_FONTS[config.font ?? (look.pills ? "montserrat" : "serif")] ?? HOOK_FONTS.serif;
+  const typeface = HOOK_FONTS[config.font ?? look.defaultFont ?? "serif"] ?? HOOK_FONTS.serif;
   const fontSize = Math.round(1080 * 0.9 * typeface.factor * scale);
   const outlinePx = Math.round(look.outlinePx * scale);
 
@@ -196,7 +218,7 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
           backgroundColor: look.box ?? "transparent",
           borderRadius: 20,
           padding: look.box ? `${25 * scale}px ${30 * scale}px` : 0,
-          boxShadow: look.shadow ? "5px 5px 15px rgba(0, 0, 0, 0.25)" : "none",
+          boxShadow: look.box && look.shadow ? "5px 5px 15px rgba(0, 0, 0, 0.25)" : "none",
           textAlign: "center",
         }}
       >
@@ -208,15 +230,17 @@ const HookBox: React.FC<HookBoxProps> = ({ config, displayFrames }) => {
             color: look.text,
             lineHeight: 1.4,
             wordBreak: "break-word",
+            textTransform: look.uppercase ? "uppercase" : "none",
+            textShadow: !look.box && look.shadow ? "3px 6px 12px rgba(0, 0, 0, 0.82)" : undefined,
             ...(outlinePx > 0
               ? {
-                  WebkitTextStroke: `${outlinePx}px #000000`,
+                  WebkitTextStroke: `${outlinePx}px ${look.outlineColor || "#000000"}`,
                   paintOrder: "stroke fill",
                 }
               : {}),
           }}
         >
-          {config.text}
+          {renderHookText(config.text, look.accent)}
         </span>
       </div>
     </div>

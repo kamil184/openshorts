@@ -55,8 +55,8 @@ export default function MediaInput({ onProcess, isProcessing }) {
         try { return localStorage.getItem('os_auto_hook') !== '0'; } catch { return true; }
     });
     const [autoHookStyle, setAutoHookStyle] = useState(() => {
-        // v2 key: the default became 'pill'; an old saved 'classic' was just the old default.
-        try { return localStorage.getItem('os_auto_hook_style_v2') || 'pill'; } catch { return 'pill'; }
+        // v3 key: the default became 'headline'; an old saved 'pill' was just the old default.
+        try { return localStorage.getItem('os_auto_hook_style_v3') || 'headline'; } catch { return 'headline'; }
     });
     // Layout: 'auto' lets the AI pick per video (server default); the others
     // force one on so a podcast host who knows what they uploaded doesn't
@@ -132,7 +132,7 @@ export default function MediaInput({ onProcess, isProcessing }) {
         };
         try {
             localStorage.setItem('os_auto_hook', autoHook ? '1' : '0');
-            localStorage.setItem('os_auto_hook_style_v2', autoHookStyle);
+            localStorage.setItem('os_auto_hook_style_v3', autoHookStyle);
             localStorage.setItem('os_layout', layout);
         } catch { /* ignore */ }
         if (mode === 'url' && url) {
@@ -384,6 +384,7 @@ export default function MediaInput({ onProcess, isProcessing }) {
                                         onChange={(e) => setAutoHookStyle(e.target.value)}
                                         className="input-field !w-auto text-xs py-1.5"
                                     >
+                                        <option value="headline">Headline</option>
                                         <option value="pill">Pills</option>
                                         <option value="classic">Classic</option>
                                         <option value="dark">Dark</option>

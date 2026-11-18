@@ -5981,7 +5981,7 @@ async def process_endpoint(
         from hooks import HOOK_STYLES
         if auto_hook_style in HOOK_STYLES:
             env["AUTO_HOOK_STYLE"] = auto_hook_style
-        print(f"[auto-hook] job={job_id} style={env.get('AUTO_HOOK_STYLE', 'classic')}")
+        print(f"[auto-hook] job={job_id} style={env.get('AUTO_HOOK_STYLE', 'headline')}")
 
     # Manual generation controls (discussion #65): optional clip-count target
     # and duration band, forwarded to the selection prompts via the same env
@@ -7558,9 +7558,9 @@ async def _set_clip_mode_locked(req: ClipModeRequest, request: Request, job):
         hook_seconds = 0.0
         if had_hook:
             try:
-                hook_seconds = float((clip.get('auto_hook') or {}).get('duration_seconds') or 5.0)
+                hook_seconds = float((clip.get('auto_hook') or {}).get('duration_seconds') or 2.5)
             except (TypeError, ValueError):
-                hook_seconds = 5.0
+                hook_seconds = 2.5
         try:
             new_base, updates = await loop.run_in_executor(
                 None, lambda: pro_mode.convert(
@@ -8515,8 +8515,8 @@ class HookRequest(BaseModel):
     position: Optional[str] = "auto"
     size: Optional[str] = "M" # S, M, L
     duration_seconds: Optional[float] = None  # None = hook visible for the whole clip
-    style: Optional[str] = "pill"  # pill/classic/dark/yellow/red/outline/outline_yellow
-    font: Optional[str] = None  # montserrat/anton/serif (hooks.HOOK_FONTS); None = the style's own
+    style: Optional[str] = "headline"  # headline/pill/classic/dark/yellow/red/outline/outline_yellow
+    font: Optional[str] = None  # condensed/montserrat/anton/serif (hooks.HOOK_FONTS); None = the style's own
     remove: Optional[bool] = False  # strip the burned hook instead of adding one
 
 @app.post("/api/hook")
