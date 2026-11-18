@@ -112,15 +112,15 @@ def test_policy_block_fails_fast_without_retrying():
             _Models.calls += 1
             return _BlockedResponse()
 
-    import gemini_worker
-    with pytest.raises(gemini_worker.GeminiBlockedError) as exc:
+    import prompts
+    with pytest.raises(llm_backend.BlockedError) as exc:
         main._run_gemini_stage(_client(_Models()), "m", "prompt", object)
     assert _Models.calls == 1
     assert "PROHIBITED_CONTENT" in str(exc.value)
 
 
 def test_blocked_finish_reason_also_raises():
-    import gemini_worker
+    import prompts
 
     class _Cand:
         class _FR:
@@ -132,15 +132,15 @@ def test_blocked_finish_reason_also_raises():
         prompt_feedback = None
         candidates = [_Cand()]
 
-    with pytest.raises(gemini_worker.GeminiBlockedError):
-        gemini_worker.raise_if_blocked(_Resp())
+    with pytest.raises(llm_backend.BlockedError):
+        llm_gemini.raise_if_blocked(_Resp())
 
 
 def test_clean_response_is_not_flagged_as_blocked():
-    import gemini_worker
+    import prompts
 
     class _Resp:
         prompt_feedback = None
         candidates = []
 
-    gemini_worker.raise_if_blocked(_Resp())  # must not raise
+    llm_gemini.raise_if_blocked(_Resp())  # must not raise

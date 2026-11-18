@@ -26,13 +26,12 @@ What is different here is the question asked and what the answer is used for.
     speaker, which is a reasonable frame even when the trigger was wrong.
 
 Off by default (``SCREENCAST_LAYOUT=1``, set per job by ``layouts=["screencast"]``
-or by the layout picker). Which shots show a screen is asked of Gemini per clip
+or by the layout picker). Which shots show a screen is asked of the vision model per clip
 (``detect_content_ranges``, one still per shot); without an answer the scenes
 the face classifier sent to GENERAL are taken as the screen (``fallback_ranges``),
 because the job was declared a screencast and GENERAL is the one layout that
 shrinks a screen into an unreadable strip.
 """
-import json
 import os
 
 import numpy as np
@@ -368,50 +367,28 @@ def detect_content_ranges(video_path, scenes, fps):
     if not scenes:
         return None
     import llm_backend
-    use_llm = llm_backend.active()
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not use_llm and not api_key:
-        print("   ⚠️ Screen check needs GEMINI_API_KEY or an LLM_BASE_URL vision model.")
+    model_name = llm_backend.image_model()
+    if not model_name:
+        print("   ⚠️ Screen check needs a configured model that takes images.")
         return None
 
-    model_name = (llm_backend.vision_model() if use_llm
-                  else os.environ.get("GEMINI_MODEL") or 'gemini-3.1-flash-lite')
     asked = shots_to_ask(scenes)
     print(f"   🔎 Screen check on {len(asked)} shot(s)…")
     try:
-        import gemini_worker
+        import prompts
 
         frames = _shot_frames(video_path, scenes, asked)
         keep = [(i, jpg) for i, jpg in zip(asked, frames) if jpg]
         if not keep:
             print("   ⚠️ No readable frames for the screen check.")
             return None
-        if use_llm:
-            media = []
-            for n, (_, jpg) in enumerate(keep):
-                media += [f"Shot {n}:", jpg]
-            answer, _ = llm_backend.generate_json(
-                gemini_worker.SHOT_CONTENT_PROMPT, gemini_worker.ShotContentResponse,
-                model=model_name, media=media)
-            raw = (answer or {}).get("shots") or []
-        else:
-            from google import genai
-            from google.genai import types as genai_types
-
-            parts = []
-            for n, (_, jpg) in enumerate(keep):
-                parts.append(f"Shot {n}:")
-                parts.append(genai_types.Part.from_bytes(data=jpg, mime_type="image/jpeg"))
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=model_name,
-                contents=parts + [gemini_worker.SHOT_CONTENT_PROMPT],
-                config=genai_types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=gemini_worker.ShotContentResponse,
-                ))
-            gemini_worker.raise_if_blocked(response)
-            raw = (json.loads(response.text) or {}).get("shots") or []
+        media = []
+        for n, (_, jpg) in enumerate(keep):
+            media += [f"Shot {n}:", jpg]
+        answer, _ = llm_backend.generate_json(
+            prompts.SHOT_CONTENT_PROMPT, prompts.ShotContentResponse,
+            model=model_name, media=media)
+        raw = answer.get("shots") or []
     except Exception as e:
         print(f"   ⚠️ Screen check failed ({e}).")
         return None

@@ -1,19 +1,12 @@
-import argparse
+"""Response schemas and prompt templates for every model stage.
+
+Provider-neutral: ``llm_backend`` sends these to whichever model is configured
+and validates the answer against the same pydantic schema.
+"""
 import json
-import mimetypes
-import os
-import sys
 from typing import List, Optional
 
-from dotenv import load_dotenv
-from google import genai
-from google.genai import types as genai_types
 from pydantic import BaseModel
-
-from clip_selection import (clip_count_targets, clip_duration_bounds,
-                            lookup_model_prices)
-
-load_dotenv()
 
 
 # --- Structured output schemas (passed as response_schema so the API
@@ -50,7 +43,7 @@ class DetailResponse(BaseModel):
     shorts: List[DetailClipModel]
 
 
-# Visual (no-transcript) clip selection: Gemini watches a silent video and
+# Visual (no-transcript) clip selection: the model watches a silent video and
 # picks moments from the imagery. Same output shape as DetailClipModel minus
 # the transcript-only source_window_id.
 class VisualClipModel(BaseModel):
@@ -229,28 +222,6 @@ answer false.
 """
 
 
-def _configure_stdio() -> None:
-    for stream_name in ("stdout", "stderr"):
-        stream = getattr(sys, stream_name, None)
-        if not stream or not hasattr(stream, "reconfigure"):
-            continue
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-
-
-def _log(message: str) -> None:
-    stream = sys.stdout
-    text = str(message)
-    try:
-        stream.write(text + "\n")
-    except UnicodeEncodeError:
-        encoding = getattr(stream, "encoding", None) or "utf-8"
-        safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
-        stream.write(safe_text + "\n")
-    stream.flush()
-
 SCORE_PROMPT_TEMPLATE = """
 You are a senior short-form video strategist.
 RANK these candidate windows by how well each would work as a standalone short.
@@ -408,12 +379,12 @@ def _escape_invalid_unicode_escapes(text: str) -> str:
     return "".join(chars)
 
 
-def _parse_json_response_text(text: str) -> dict:
+def parse_json_text(text: str) -> dict:
     if not text:
-        raise ValueError("Gemini returned an empty response body.")
+        raise ValueError("The model returned an empty response body.")
     candidate = _extract_json_candidate(text).replace("\x00", "").strip()
     if not candidate:
-        raise ValueError("Gemini response did not contain a JSON object.")
+        raise ValueError("The model response did not contain a JSON object.")
     parse_attempts = [candidate]
     sanitized_candidate = _escape_invalid_unicode_escapes(candidate)
     if sanitized_candidate != candidate:
@@ -424,223 +395,4 @@ def _parse_json_response_text(text: str) -> dict:
             return json.loads(parse_candidate)
         except json.JSONDecodeError as e:
             last_error = e
-    raise ValueError(f"Failed to parse Gemini JSON response: {last_error}")
-
-
-def upload_media(client, path, mime_type=None):
-    """Upload a local file to the Gemini Files API, by handle and never by path.
-
-    Handed a path, the SDK copies ``os.path.basename(path)`` verbatim into the
-    ``X-Goog-Upload-File-Name`` header, and httpx encodes header values as
-    ASCII. The downloaded source is named after the video's title, so every
-    video whose title is written in Japanese, Cyrillic, Arabic or Greek died
-    before a byte left the container with ``'ascii' codec can't encode
-    characters in position 0-4`` (prod, 20-sep-2026) — on the three stages
-    that upload the whole file: the silent-footage vision pass, the screencast
-    detector and the AI editor. Passing an open handle skips that header
-    entirely; the readable name still travels as ``display_name``, which goes
-    in the JSON body and is UTF-8 all the way.
-    """
-    guessed = mime_type or mimetypes.guess_type(path)[0] or ""
-    # Every caller uploads the source video; an extension the stdlib does not
-    # know (or knows as octet-stream) must not reach the API as a type it
-    # refuses, so fall back to the container the pipeline always writes.
-    if not guessed.startswith(("video/", "audio/", "image/")):
-        guessed = "video/mp4"
-    with open(path, "rb") as fh:
-        return client.files.upload(
-            file=fh,
-            config={"mime_type": guessed,
-                    "display_name": os.path.basename(path)},
-        )
-
-
-class GeminiBlockedError(ValueError):
-    """The API refused the request for content-policy reasons.
-
-    Deterministic: the same payload is rejected every time (verified in prod,
-    23-jul-2026 — a stand-up video came back PROHIBITED_CONTENT in ~300ms on
-    every attempt), and BLOCK_NONE safety settings do NOT lift it. Retrying is
-    pointless, so callers must fail fast with a message that tells the user the
-    video's content is the problem, not the service."""
-
-
-_BLOCKED_FINISH_REASONS = {"SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST",
-                           "SPII", "IMAGE_SAFETY", "RECITATION"}
-
-
-def raise_if_blocked(response):
-    """Raise GeminiBlockedError when the API refused to answer on policy grounds."""
-    pf = getattr(response, "prompt_feedback", None)
-    reason = getattr(pf, "block_reason", None)
-    if reason:
-        name = getattr(reason, "name", None) or str(reason)
-        raise GeminiBlockedError(
-            f"Gemini blocked this video's content ({name}). The AI provider's "
-            "usage policies reject this material, so it can't be analyzed.")
-    for c in (getattr(response, "candidates", None) or []):
-        fr = getattr(c, "finish_reason", None)
-        name = (getattr(fr, "name", None) or str(fr or "")).upper()
-        if name in _BLOCKED_FINISH_REASONS:
-            raise GeminiBlockedError(
-                f"Gemini blocked its answer for this video ({name}). The AI "
-                "provider's usage policies reject this material, so it can't be analyzed.")
-
-
-def _get_response_text(response) -> str:
-    try:
-        text = response.text
-        if text:
-            return text
-    except Exception:
-        pass
-
-    parts = []
-    for candidate in getattr(response, "candidates", []) or []:
-        content = getattr(candidate, "content", None)
-        for part in getattr(content, "parts", []) or []:
-            part_text = getattr(part, "text", None)
-            if part_text:
-                parts.append(part_text)
-    return "\n".join(parts).strip()
-
-
-def _calculate_cost_analysis(response, model_name: str) -> Optional[dict]:
-    usage = getattr(response, "usage_metadata", None)
-    if not usage:
-        return None
-    prices = lookup_model_prices(model_name)
-    price_estimated = prices is None
-    if prices is None:
-        # Unknown model: conservative estimate so the UI shows something sane.
-        prices = (0.50, 3.00)
-    input_price_per_million, output_price_per_million = prices
-    prompt_tokens = usage.prompt_token_count or 0
-    output_tokens = usage.candidates_token_count or 0
-    # Thinking tokens bill at the output rate even though they are invisible.
-    thinking_tokens = getattr(usage, "thoughts_token_count", 0) or 0
-    input_cost = (prompt_tokens / 1_000_000) * input_price_per_million
-    output_cost = ((output_tokens + thinking_tokens) / 1_000_000) * output_price_per_million
-    total_cost = input_cost + output_cost
-    return {
-        "input_tokens": prompt_tokens,
-        "output_tokens": output_tokens,
-        "thinking_tokens": thinking_tokens,
-        "input_cost": input_cost,
-        "output_cost": output_cost,
-        "total_cost": total_cost,
-        "model": model_name,
-        "price_estimated": price_estimated,
-    }
-
-
-def _thinking_config_from_env(model_name: str):
-    """GEMINI_THINKING_SCORE: off (default) | low | high | <token budget>.
-
-    Applied only to the scoring stage. Gemini 3 models take thinking_level,
-    Gemini 2.5 takes thinking_budget; returns None (= model default) if the
-    setting is off or the SDK rejects the config."""
-    raw = (os.getenv("GEMINI_THINKING_SCORE") or "off").strip().lower()
-    if raw in ("", "off", "0", "none", "false"):
-        return None
-    try:
-        if raw.isdigit():
-            return genai_types.ThinkingConfig(thinking_budget=int(raw))
-        if raw in ("low", "high"):
-            if model_name.startswith("gemini-3"):
-                return genai_types.ThinkingConfig(thinking_level=raw)
-            return genai_types.ThinkingConfig(thinking_budget=2048 if raw == "low" else 8192)
-    except Exception as e:
-        _log(f"⚠️ Ignoring GEMINI_THINKING_SCORE={raw!r}: {e}")
-    return None
-
-
-def _config_for_strategy(strategy: str, mode: str, model_name: str) -> genai_types.GenerateContentConfig:
-    # The detail stage writes creative copy (hooks/descriptions) — it gets a
-    # high temperature; timestamps are validated and word-snapped afterwards.
-    # The score stage stays precise. Fallback strategies get conservative.
-    creative = mode == "detail"
-    kwargs = {
-        "response_mime_type": "application/json",
-        "candidate_count": 1,
-    }
-    if strategy == "strict-json":
-        kwargs["temperature"] = 0.7 if creative else 0.1
-    elif strategy == "json-text-recovery":
-        kwargs["temperature"] = 0.2 if creative else 0.0
-    else:  # structured-schema: schema-enforced output, primary strategy
-        kwargs["temperature"] = 0.9 if creative else 0.2
-        kwargs["response_schema"] = DetailResponse if mode == "detail" else ScoreResponse
-        if mode == "score":
-            thinking = _thinking_config_from_env(model_name)
-            if thinking is not None:
-                kwargs["thinking_config"] = thinking
-    return genai_types.GenerateContentConfig(**kwargs)
-
-
-def main() -> int:
-    _configure_stdio()
-
-    parser = argparse.ArgumentParser(description="Run a single Gemini request for clip scoring/detailing.")
-    parser.add_argument("--mode", choices=["score", "detail"], required=True)
-    parser.add_argument("--input", dest="input_path", required=True)
-    parser.add_argument("--output", dest="output_path", required=True)
-    parser.add_argument("--strategy", default="structured-schema")
-    parser.add_argument("--model", default="gemini-2.5-flash")
-    args = parser.parse_args()
-
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise SystemExit("Missing GEMINI_API_KEY.")
-
-    with open(args.input_path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-
-    model_name = args.model
-    client = genai.Client(api_key=api_key)
-    config = _config_for_strategy(args.strategy, args.mode, model_name)
-    language = str(payload.get("language") or "unknown")
-
-    template = SCORE_PROMPT_TEMPLATE if args.mode == "score" else DETAIL_PROMPT_TEMPLATE
-    fmt = {
-        "video_duration": payload["video_duration"],
-        "language": language,
-        "windows_json": json.dumps(payload["windows"], ensure_ascii=False),
-    }
-    if args.mode != "score":
-        # Score mode receives every window, not a shortlist, so a count target
-        # derived from it would be meaningless — and the score template has no
-        # placeholder for one: it ranks whatever it is given.
-        fmt["min_clips"], fmt["max_clips"] = clip_count_targets(len(payload.get("windows") or []))
-        fmt["min_secs"], fmt["max_secs"] = clip_duration_bounds()
-    prompt = template.format(**fmt)
-
-    _log(f"🤖 Gemini worker request: mode={args.mode} strategy={args.strategy} model={model_name} items={len(payload.get('windows', []))}")
-    response = client.models.generate_content(
-        model=model_name,
-        contents=prompt,
-        config=config,
-    )
-
-    raw_text = _get_response_text(response)
-    # With response_schema the SDK returns an already-validated object; fall
-    # back to the text-repair path only when that is unavailable.
-    parsed_obj = getattr(response, "parsed", None)
-    if parsed_obj is not None:
-        parsed = parsed_obj.model_dump() if hasattr(parsed_obj, "model_dump") else parsed_obj
-    else:
-        parsed = _parse_json_response_text(raw_text)
-    result = {
-        "mode": args.mode,
-        "payload": parsed,
-        "cost_analysis": _calculate_cost_analysis(response, model_name),
-        "raw_text": raw_text,
-    }
-    with open(args.output_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
-    _log(f"✅ Gemini worker success: mode={args.mode}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    raise ValueError(f"Failed to parse the model JSON response: {last_error}")

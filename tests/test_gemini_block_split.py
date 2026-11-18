@@ -1,7 +1,7 @@
 """A policy block on a batch of windows must bisect, not kill the job."""
 import pytest
 main = pytest.importorskip("main")
-import gemini_worker
+import prompts
 
 
 def _windows(n):
@@ -14,9 +14,9 @@ def test_block_on_pair_isolates_and_drops_only_the_culprit(monkeypatch):
         ids = [w["id"] for w in __import__("json").loads(prompt)]
         calls.append(ids)
         if "w5" in ids and "w6" in ids:      # the pair that trips the filter
-            raise gemini_worker.GeminiBlockedError("PROHIBITED_CONTENT")
+            raise llm_backend.BlockedError("PROHIBITED_CONTENT")
         if ids == ["w3"]:                    # and w3 blocks even on its own
-            raise gemini_worker.GeminiBlockedError("PROHIBITED_CONTENT")
+            raise llm_backend.BlockedError("PROHIBITED_CONTENT")
         return {"windows": [{"id": i, "score": 50} for i in ids]}, {"input_tokens": 1}
     monkeypatch.setattr(main, "_run_gemini_stage", fake_stage)
     costs = []

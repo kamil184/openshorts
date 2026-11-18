@@ -12,7 +12,7 @@ import io
 import httpx
 import pytest
 
-import gemini_worker
+import prompts
 
 
 def _prepared_headers(file_arg, mime_type=None):
@@ -55,7 +55,7 @@ def test_the_path_form_is_what_breaks(unicode_video):
 
 def test_upload_media_survives_a_non_ascii_title(unicode_video):
     client = _FakeClient()
-    assert gemini_worker.upload_media(client, unicode_video) == "uploaded"
+    assert llm_gemini.upload_media(client, unicode_video) == "uploaded"
     file_arg, config = client.files.calls[0]
     assert isinstance(file_arg, io.IOBase), "must upload by handle, not by path"
     assert config["mime_type"] == "video/mp4"
@@ -67,7 +67,7 @@ def test_an_unknown_extension_still_gets_a_mime_type(tmp_path):
     path = tmp_path / "clip.bin"
     path.write_bytes(b"\0" * 16)
     client = _FakeClient()
-    gemini_worker.upload_media(client, str(path))
+    llm_gemini.upload_media(client, str(path))
     assert client.files.calls[0][1]["mime_type"] == "video/mp4"
 
 

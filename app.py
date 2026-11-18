@@ -5795,11 +5795,10 @@ async def process_endpoint(
     source_end: Optional[str] = Form(None),
 ):
     api_key = await resolve_gemini(request)
-    if not api_key and not (llm_backend.active() and not BILLING_ENABLED):
-        # Self-host with an OpenAI-compatible server configured needs no
-        # Google key for the core pipeline: the moment picker runs there and
-        # the frame-based stages degrade on their own (layout_picker returns
-        # "none", silent videos fail with a message that says why).
+    if not api_key and not (llm_backend.available() and not BILLING_ENABLED):
+        # Self-host with a model configured on the server (llm_backend) needs
+        # no per-request key: every stage asks the configured models, and the
+        # frame-based ones skip themselves when those models cannot see.
         raise gemini_missing_error()
 
     ack_flag = str(acknowledged).lower() in ("1", "true", "yes")
@@ -5911,7 +5910,7 @@ async def process_endpoint(
     if api_key:
         env["GEMINI_API_KEY"] = api_key # Override with key from request
     else:
-        env.pop("GEMINI_API_KEY", None)  # local-LLM job: main.py must not find a stale key
+        env.pop("GEMINI_API_KEY", None)  # server-model job: main.py must not find a stale key
     # The stdio fix above only covers this process. main.py prints an emoji on
     # its first line and configures nothing, so on a cp1252 console the child
     # still dies before it renders anything -- the server starts and every job

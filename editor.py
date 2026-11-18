@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-import gemini_worker
+import llm_gemini
 from edit_builder import build_filter_string
 from ffmpeg_utils import video_encode_args, QUALITY, METADATA_SCRUB
 
@@ -44,7 +44,7 @@ class VideoEditor:
             
         # Using 'file' keyword instead of 'path'
         try:
-            file_upload = gemini_worker.upload_media(self.client, video_path)
+            file_upload = llm_gemini.upload_media(self.client, video_path)
         except Exception as e:
             print(f"❌ Gemini Upload Error: {e}")
             raise e

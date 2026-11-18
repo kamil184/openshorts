@@ -522,10 +522,13 @@ Transcript:
 
 def _ask_model(prompt, api_key):
     """One text call that must answer {"titles": [...]}. Split out so tests
-    can stub it; a local LLM (llm_backend) takes it when one is configured."""
+    can stub it. ``api_key`` is the caller's own Gemini key, used only when
+    the server configures no model (``llm_backend``)."""
     from typing import List
 
     from pydantic import BaseModel
+
+    import llm_backend
 
     class Title(BaseModel):
         word_index: int
@@ -534,20 +537,7 @@ def _ask_model(prompt, api_key):
     class Titles(BaseModel):
         titles: List[Title]
 
-    import llm_backend
-    if llm_backend.active():
-        return llm_backend.generate_json(prompt, Titles)[0]
-    from google import genai
-    from google.genai import types as genai_types
-    # Keep the client in a name: one built inline is closed before its call
-    # is sent ("client has been closed").
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model=os.environ.get("GEMINI_MODEL") or "gemini-3.1-flash-lite",
-        contents=[prompt],
-        config=genai_types.GenerateContentConfig(
-            response_mime_type="application/json", response_schema=Titles))
-    return json.loads(response.text) or {}
+    return llm_backend.generate_json(prompt, Titles, gemini_key=api_key)[0]
 
 
 def _plain(text):
@@ -587,7 +577,7 @@ def pick_titles(words, clip_title="", api_key=None):
     Empty without a model to ask, and on any failure: a clip without titles
     is still a pro clip."""
     import llm_backend
-    if not words or not (api_key or llm_backend.active()):
+    if not words or not (api_key or llm_backend.available()):
         return []
     listing = "\n".join(f"{i}|{w['s']:.2f}|{w['w']}" for i, w in enumerate(words))
     try:
@@ -997,7 +987,7 @@ def convert(base_path, clean_name, clip, transcript, wait=0.0, api_key=None,
     kept stretches, on the source timeline), so captions and the clip editor
     follow the new cut the way they follow a manual trim.
 
-    ``api_key`` (or a configured local LLM) adds the keyword titles;
+    ``api_key`` (or a server-configured model) adds the keyword titles;
     ``hook_seconds`` keeps them off the hook's time on screen. ``caption_style``
     becomes the clip's caption style unless the user already picked one: going
     back to normal undoes it only if it is still the one set here."""

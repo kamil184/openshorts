@@ -41,7 +41,7 @@ def _run(monkeypatch, detail_responses):
     def fake_stage(client, model, prompt, schema):
         payload = json.loads(prompt.split("WINDOWS_JSON:")[-1].split("Return only:")[0]
                              if "WINDOWS_JSON:" in prompt else "[]")
-        if schema is main.gemini_worker.ScoreResponse:
+        if schema is main.prompts.ScoreResponse:
             ids = [w["id"] for w in payload]
             calls.append(("score", ids))
             # The prompt asks for every window to be scored.
