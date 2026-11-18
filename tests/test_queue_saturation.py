@@ -4,9 +4,12 @@ Codes ``XA``/``XB`` are ISO user-assigned placeholders, not real countries.
 Fake clock where it matters; nothing leaves the process.
 """
 import asyncio
+import builtins
+import gc
 import itertools
 import json
 import os
+import threading
 import time
 from types import SimpleNamespace
 
@@ -812,25 +815,63 @@ class TestWatch:
 
 # --- Volume: the loop stays responsive ---------------------------------------------------
 
-def _worst_stall(coro_fn):
+# What the loop must not do is measured as work, not as wall time: a busy
+# machine stretches every gap between two ticks, and a full collection of the
+# test session's heap can land in any thread. So (1) the heap that exists
+# before the call is frozen and collected out of the way, (2) the loop
+# thread's own CPU time between two ticks is the hold, and (3) every disk
+# call (and sleep) made on the loop thread while the call runs is recorded:
+# waiting on a disk costs no CPU, so (2) alone would miss it.
+_DISK_CALLS = [(builtins, "open"), (os, "open"), (os, "listdir"), (os, "scandir"),
+               (os, "stat"), (os, "replace"), (os, "remove"), (os, "fsync"),
+               (time, "sleep")]
+
+
+def _loop_hold(coro_fn):
+    """``(worst CPU seconds the loop thread spent between two ticks, disk
+    calls made on the loop thread, result)`` while ``coro_fn()`` runs."""
+    on_loop, loop_ident = [], None
+
+    def watch(mod, name, real):
+        def call(*a, **k):
+            if threading.get_ident() == loop_ident:
+                on_loop.append(f"{name}({a[0] if a else ''})")
+            return real(*a, **k)
+        return call
+
     async def run():
+        nonlocal loop_ident
         worst, stop = 0.0, False
+        loop_ident = threading.get_ident()
 
         async def ticker():
             nonlocal worst
-            last = time.perf_counter()
+            last = time.thread_time()
             while not stop:
                 await asyncio.sleep(0.005)
-                now = time.perf_counter()
-                worst = max(worst, now - last - 0.005)
+                now = time.thread_time()
+                worst = max(worst, now - last)
                 last = now
         t = asyncio.create_task(ticker())
         await asyncio.sleep(0.02)
-        result = await coro_fn()
+        saved = [(mod, name, getattr(mod, name)) for mod, name in _DISK_CALLS]
+        for mod, name, real in saved:
+            setattr(mod, name, watch(mod, name, real))
+        try:
+            result = await coro_fn()
+        finally:
+            for mod, name, real in saved:
+                setattr(mod, name, real)
         stop = True
         await t
-        return worst, result
-    return asyncio.run(run())
+        return worst, list(on_loop), result
+
+    gc.collect()
+    gc.freeze()
+    try:
+        return asyncio.run(run())
+    finally:
+        gc.unfreeze()
 
 
 class TestVolume:
@@ -850,8 +891,9 @@ class TestVolume:
             time.sleep(0.5)          # a slow shared disk listing + reads
             return names
         monkeypatch.setattr(app_module, "_manifest_names", slow_names)
-        worst, keep = _worst_stall(app_module._resume_interrupted_jobs_async)
+        worst, on_loop, keep = _loop_hold(app_module._resume_interrupted_jobs_async)
         assert len(keep) == 800 and app_module.job_queue.qsize() == 800
+        assert not on_loop, f"disk calls on the loop: {on_loop[:5]}"
         assert worst < 0.15, f"loop held {worst * 1000:.0f} ms"
         assert _order()[:3] == ["m0", "m1", "m2"]
 
@@ -876,8 +918,9 @@ class TestVolume:
         monkeypatch.setattr(app_module, "_notify_job_webhook", noop)
         monkeypatch.setattr(app_module, "_autopilot_job_finished", noop)
         now = 1e5 + app_module.ACTIVE_JOB_MAX_SECONDS - 5e4   # about half are past it
-        worst, gone = _worst_stall(lambda: app_module._expire_starved_jobs(now))
+        worst, on_loop, gone = _loop_hold(lambda: app_module._expire_starved_jobs(now))
         assert 0 < len(gone) < self.N
+        assert not on_loop, f"disk calls on the loop: {on_loop[:5]}"
         assert worst < 0.15, f"loop held {worst * 1000:.0f} ms"
         assert app_module.job_queue.qsize() == self.N - len(gone)
         _assert_heap()
