@@ -179,3 +179,116 @@ def test_extra_body_that_is_not_an_object_fails_loudly(local, monkeypatch):
 
     with pytest.raises(ValueError, match="JSON object"):
         llm_backend.generate_json("prompt", gemini_worker.ScoreResponse)
+
+
+# --- vision: images, video and model selection --------------------------------
+
+def test_media_parts_keep_order_and_put_the_prompt_last(local, monkeypatch):
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return _completion({"windows": []})
+
+    _serve(handler, monkeypatch)
+    llm_backend.generate_json("the prompt", gemini_worker.ScoreResponse,
+                              media=["Shot 0:", b"\xff\xd8jpeg", llm_backend.Video(b"mp4")])
+
+    parts = seen["body"]["messages"][1]["content"]
+    assert [p["type"] for p in parts] == ["text", "image_url", "video_url", "text"]
+    assert parts[0]["text"] == "Shot 0:"
+    assert parts[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+    assert parts[2]["video_url"]["url"].startswith("data:video/mp4;base64,")
+    assert parts[3]["text"] == "the prompt"
+
+
+def test_text_only_requests_keep_a_plain_string_content(local, monkeypatch):
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return _completion({"windows": []})
+
+    _serve(handler, monkeypatch)
+    llm_backend.generate_json("just text", gemini_worker.ScoreResponse)
+
+    assert seen["body"]["messages"][1]["content"] == "just text"
+
+
+def test_unsupported_media_part_is_rejected():
+    with pytest.raises(TypeError):
+        llm_backend._content("p", [123])
+
+
+def test_gateway_cost_is_reported_when_the_server_bills(local, monkeypatch):
+    _serve(lambda request: _completion(
+        {"windows": []},
+        usage={"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0012,
+               "completion_tokens_details": {"reasoning_tokens": 3}}), monkeypatch)
+
+    _, cost = llm_backend.generate_json("p", gemini_worker.ScoreResponse)
+
+    assert cost["total_cost"] == pytest.approx(0.0012)
+    assert cost["thinking_tokens"] == 3
+    assert cost["local"] is False
+
+
+def test_vision_and_video_models_fall_back_to_the_text_model(local, monkeypatch):
+    monkeypatch.delenv("LLM_VISION_MODEL", raising=False)
+    monkeypatch.delenv("LLM_VIDEO_MODEL", raising=False)
+    assert llm_backend.vision_model() == "qwen2.5:14b"
+    assert llm_backend.video_model() == "qwen2.5:14b"
+
+    monkeypatch.setenv("LLM_VISION_MODEL", "meta/muse-ember")
+    assert llm_backend.video_model() == "meta/muse-ember"
+    monkeypatch.setenv("LLM_VIDEO_MODEL", "openai/gpt-6-luna")
+    assert llm_backend.video_model() == "openai/gpt-6-luna"
+
+
+def test_video_input_mode_is_validated(monkeypatch):
+    monkeypatch.delenv("LLM_VIDEO_INPUT", raising=False)
+    assert llm_backend.video_input_mode() == "video"
+    monkeypatch.setenv("LLM_VIDEO_INPUT", "frames")
+    assert llm_backend.video_input_mode() == "frames"
+    monkeypatch.setenv("LLM_VIDEO_INPUT", "gif")
+    with pytest.raises(ValueError):
+        llm_backend.video_input_mode()
+
+
+def test_layout_picker_asks_the_vision_model_without_a_gemini_key(local, monkeypatch):
+    import layout_picker
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_VISION_MODEL", "meta/muse-ember")
+    monkeypatch.setattr(layout_picker, "ENABLED", True)
+    monkeypatch.setattr(layout_picker, "sample_frames", lambda path: [b"a", b"b"])
+    asked = {}
+
+    def fake_generate(prompt, schema, model=None, media=None):
+        asked.update(model=model, media=media, schema=schema)
+        return {"layout": sorted(layout_picker.VALID - {"none"})[0], "why": "x",
+                "confidence": 0.9}, None
+
+    monkeypatch.setattr(llm_backend, "generate_json", fake_generate)
+
+    decision = layout_picker.pick("video.mp4", 60)
+
+    assert decision in layout_picker.VALID and decision != "none"
+    assert asked["model"] == "meta/muse-ember"
+    assert asked["media"] == [b"a", b"b"]
+    assert asked["schema"] is gemini_worker.LayoutChoice
+
+
+def test_layout_picker_falls_back_to_none_when_the_vision_call_fails(local, monkeypatch):
+    import layout_picker
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(layout_picker, "ENABLED", True)
+    monkeypatch.setattr(layout_picker, "sample_frames", lambda path: [b"a"])
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(llm_backend, "generate_json", boom)
+
+    assert layout_picker.pick("video.mp4", 60) == "none"

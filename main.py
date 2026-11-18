@@ -2575,6 +2575,74 @@ def _visual_pass(client, model_name, video_path, duration, language,
                 pass
 
 
+# The OpenAI-compatible path (LLM_BASE_URL) sends each stretch inline in one
+# request, so stretches are shorter than Gemini's uploaded files. In "frames"
+# mode (models without video input) a stretch is LLM_VIDEO_MAX_FRAMES stills,
+# one every LLM_VIDEO_FRAME_INTERVAL seconds, each labelled with its time.
+LLM_VIDEO_SEGMENT_SECONDS = float(os.environ.get("LLM_VIDEO_SEGMENT_SECONDS", "600"))
+LLM_VIDEO_FRAME_INTERVAL = float(os.environ.get("LLM_VIDEO_FRAME_INTERVAL", "2"))
+LLM_VIDEO_MAX_FRAMES = int(os.environ.get("LLM_VIDEO_MAX_FRAMES", "120"))
+LLM_VIDEO_MAX_SEGMENTS = int(os.environ.get("LLM_VIDEO_MAX_SEGMENTS", "30"))
+
+FRAMES_PREAMBLE = """
+You are not given the video file itself but still frames sampled from it every
+{interval:g} seconds, in order. Each frame is preceded by its timestamp in
+seconds ("t=12"). Treat them as the video: judge motion and payoffs from how
+consecutive frames change, and give clip times in the same seconds.
+"""
+
+
+def _llm_vision_plan(video_duration):
+    """(segment_seconds, max_segments) for the OpenAI-compatible vision path."""
+    if llm_backend.video_input_mode() == "frames":
+        span = max(1.0, LLM_VIDEO_FRAME_INTERVAL) * max(1, LLM_VIDEO_MAX_FRAMES)
+        return min(LLM_VIDEO_SEGMENT_SECONDS, span), LLM_VIDEO_MAX_SEGMENTS
+    return LLM_VIDEO_SEGMENT_SECONDS, LLM_VIDEO_MAX_SEGMENTS
+
+
+def _proxy_frames(proxy_path, duration, interval):
+    """Timestamped JPEG stills of a vision proxy: ["t=0", jpg, "t=2", jpg, ...]."""
+    media = []
+    t = 0.0
+    while t < duration:
+        res = subprocess.run(
+            ["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", proxy_path,
+             "-frames:v", "1", "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+            capture_output=True)
+        if res.returncode == 0 and res.stdout:
+            media += [f"t={t:g}", res.stdout]
+        t += interval
+    return media
+
+
+def _llm_visual_pass(model_name, video_path, duration, language,
+                     min_clips, max_clips, min_secs, max_secs, hint=""):
+    """``_visual_pass`` for an OpenAI-compatible vision model: the proxy goes
+    inline, as a video or as timestamped frames (``LLM_VIDEO_INPUT``)."""
+    prompt = gemini_worker.VISUAL_PROMPT_TEMPLATE.format(
+        video_duration=duration, language=language,
+        min_clips=min_clips, max_clips=max_clips,
+        min_secs=min_secs, max_secs=max_secs) + (hint or "")
+    if llm_backend.video_input_mode() == "frames":
+        interval = max(1.0, LLM_VIDEO_FRAME_INTERVAL)
+        media = _proxy_frames(video_path, duration, interval)
+        if not media:
+            raise RuntimeError("no readable frames in the vision proxy")
+        prompt = FRAMES_PREAMBLE.format(interval=interval) + prompt
+    else:
+        with open(video_path, "rb") as f:
+            media = [llm_backend.Video(f.read())]
+    parsed, cost = llm_backend.generate_json(
+        prompt, gemini_worker.VisualResponse, model=model_name, media=media)
+    clean = []
+    for s in parsed.get("shorts") or []:
+        s["start"] = max(0.0, float(s.get("start", 0)))
+        s["end"] = min(float(duration), float(s.get("end", 0)))
+        if s["end"] - s["start"] >= 1.0:
+            clean.append(s)
+    return clean, cost
+
+
 def get_visual_clips(video_path, video_duration, language="en", viewer_clips=None):
     """Clip a SILENT video by vision: Gemini watches the footage and picks the
     most engaging visual moments (no transcript). Returns the same
@@ -2587,18 +2655,22 @@ def get_visual_clips(video_path, video_duration, language="en", viewer_clips=Non
     stretch (``vision_segments``), and the picks are merged, de-overlapped
     and cut to the best ``CLIP_TARGET_MAX`` by score: a silent multi-hour
     console capture used to fail at the model."""
-    print("🎥  Silent video — analyzing with Gemini vision (no transcript)...")
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        if llm_backend.active():
-            print("❌ This video has no usable speech, so it has to be clipped by "
-                  "watching it, and that needs Gemini (a text-only LLM server "
-                  "cannot see the footage). Add a GEMINI_API_KEY for silent videos.")
-        else:
+    use_llm = llm_backend.active()
+    if use_llm:
+        model_name = llm_backend.video_model()
+        print(f"🎥  Silent video — analyzing with {model_name} "
+              f"({llm_backend.video_input_mode()} input, no transcript)...")
+        client = None
+        segment_seconds, max_segments = _llm_vision_plan(video_duration)
+    else:
+        print("🎥  Silent video — analyzing with Gemini vision (no transcript)...")
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
             print("❌ Error: GEMINI_API_KEY not found.")
-        return None
-    client = genai.Client(api_key=api_key)
-    model_name = os.environ.get("GEMINI_MODEL") or 'gemini-3.1-flash-lite'
+            return None
+        client = genai.Client(api_key=api_key)
+        model_name = os.environ.get("GEMINI_MODEL") or 'gemini-3.1-flash-lite'
+        segment_seconds, max_segments = VISION_SEGMENT_SECONDS, VISION_MAX_SEGMENTS
 
     # The vision path has no scoring windows to derive a count from, so the
     # env targets (user request) apply directly over the classic 3-15.
@@ -2611,7 +2683,7 @@ def get_visual_clips(video_path, video_duration, language="en", viewer_clips=Non
     v_max_clips = max(v_min_clips, _env_int("CLIP_TARGET_MAX", 15))
     v_min_secs, v_max_secs = clip_duration_bounds()
 
-    segments = vision_segments(video_duration, VISION_SEGMENT_SECONDS, VISION_MAX_SEGMENTS)
+    segments = vision_segments(video_duration, segment_seconds, max_segments)
     try:
         covered = segments[-1][1]
         if len(segments) == 1:
@@ -2633,10 +2705,15 @@ def get_visual_clips(video_path, video_duration, language="en", viewer_clips=Non
                 proxy = os.path.join(tmp_dir, f"part{i}.mp4")
                 try:
                     _vision_proxy(video_path, s0, s1, proxy)
-                    shorts, cost = _visual_pass(
-                        client, model_name, proxy, round(s1 - s0, 3), language,
-                        per_min, v_max_clips, v_min_secs, v_max_secs,
-                        hint=_viewer_hint(viewer_clips, s0, s1 - s0))
+                    hint = _viewer_hint(viewer_clips, s0, s1 - s0)
+                    if use_llm:
+                        shorts, cost = _llm_visual_pass(
+                            model_name, proxy, round(s1 - s0, 3), language,
+                            per_min, v_max_clips, v_min_secs, v_max_secs, hint=hint)
+                    else:
+                        shorts, cost = _visual_pass(
+                            client, model_name, proxy, round(s1 - s0, 3), language,
+                            per_min, v_max_clips, v_min_secs, v_max_secs, hint=hint)
                 except gemini_worker.GeminiBlockedError:
                     raise
                 except Exception as e:
@@ -2671,7 +2748,7 @@ def get_visual_clips(video_path, video_duration, language="en", viewer_clips=Non
         print(f"🚫 {e}")
         raise
     except Exception as e:
-        print(f"❌ Gemini vision error: {e}")
+        print(f"❌ Vision error ({model_name}): {e}")
         return None
 
 if __name__ == '__main__':

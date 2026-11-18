@@ -367,17 +367,18 @@ def detect_content_ranges(video_path, scenes, fps):
         return []
     if not scenes:
         return None
+    import llm_backend
+    use_llm = llm_backend.active()
     api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("   ⚠️ Screen check needs GEMINI_API_KEY.")
+    if not use_llm and not api_key:
+        print("   ⚠️ Screen check needs GEMINI_API_KEY or an LLM_BASE_URL vision model.")
         return None
 
-    model_name = os.environ.get("GEMINI_MODEL") or 'gemini-3.1-flash-lite'
+    model_name = (llm_backend.vision_model() if use_llm
+                  else os.environ.get("GEMINI_MODEL") or 'gemini-3.1-flash-lite')
     asked = shots_to_ask(scenes)
     print(f"   🔎 Screen check on {len(asked)} shot(s)…")
     try:
-        from google import genai
-        from google.genai import types as genai_types
         import gemini_worker
 
         frames = _shot_frames(video_path, scenes, asked)
@@ -385,20 +386,32 @@ def detect_content_ranges(video_path, scenes, fps):
         if not keep:
             print("   ⚠️ No readable frames for the screen check.")
             return None
-        parts = []
-        for n, (_, jpg) in enumerate(keep):
-            parts.append(f"Shot {n}:")
-            parts.append(genai_types.Part.from_bytes(data=jpg, mime_type="image/jpeg"))
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model_name,
-            contents=parts + [gemini_worker.SHOT_CONTENT_PROMPT],
-            config=genai_types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=gemini_worker.ShotContentResponse,
-            ))
-        gemini_worker.raise_if_blocked(response)
-        raw = (json.loads(response.text) or {}).get("shots") or []
+        if use_llm:
+            media = []
+            for n, (_, jpg) in enumerate(keep):
+                media += [f"Shot {n}:", jpg]
+            answer, _ = llm_backend.generate_json(
+                gemini_worker.SHOT_CONTENT_PROMPT, gemini_worker.ShotContentResponse,
+                model=model_name, media=media)
+            raw = (answer or {}).get("shots") or []
+        else:
+            from google import genai
+            from google.genai import types as genai_types
+
+            parts = []
+            for n, (_, jpg) in enumerate(keep):
+                parts.append(f"Shot {n}:")
+                parts.append(genai_types.Part.from_bytes(data=jpg, mime_type="image/jpeg"))
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=model_name,
+                contents=parts + [gemini_worker.SHOT_CONTENT_PROMPT],
+                config=genai_types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=gemini_worker.ShotContentResponse,
+                ))
+            gemini_worker.raise_if_blocked(response)
+            raw = (json.loads(response.text) or {}).get("shots") or []
     except Exception as e:
         print(f"   ⚠️ Screen check failed ({e}).")
         return None

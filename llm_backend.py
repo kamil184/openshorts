@@ -23,9 +23,11 @@ so ``main.py`` sees one shape regardless of provider.
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
-from typing import Optional, Tuple, Type
+from dataclasses import dataclass
+from typing import Optional, Sequence, Tuple, Type, Union
 
 import httpx
 from pydantic import BaseModel
@@ -55,6 +57,63 @@ def model_name() -> str:
 def active() -> bool:
     """True when the moment picker should call the OpenAI-compatible server."""
     return provider() == "openai" and bool(base_url())
+
+
+def vision_model() -> str:
+    """Model for the stages that look at frames (``LLM_VISION_MODEL``)."""
+    return (os.environ.get("LLM_VISION_MODEL") or "").strip() or model_name()
+
+
+def video_model() -> str:
+    """Model for the silent-footage pass (``LLM_VIDEO_MODEL``)."""
+    return (os.environ.get("LLM_VIDEO_MODEL") or "").strip() or vision_model()
+
+
+def video_input_mode() -> str:
+    """``"video"`` sends the proxy file itself; ``"frames"`` sends timestamped
+    stills, for models that take images but not video (``LLM_VIDEO_INPUT``)."""
+    mode = (os.environ.get("LLM_VIDEO_INPUT") or "video").strip().lower()
+    if mode not in ("video", "frames"):
+        raise ValueError("LLM_VIDEO_INPUT must be 'video' or 'frames'")
+    return mode
+
+
+@dataclass(frozen=True)
+class Video:
+    """An encoded video clip handed to a model that accepts video input."""
+    data: bytes
+    mime_type: str = "video/mp4"
+
+
+MediaPart = Union[str, bytes, Video]
+
+
+def _data_url(mime_type: str, data: bytes) -> str:
+    return f"data:{mime_type};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def _content(prompt: str, media: Optional[Sequence[MediaPart]]):
+    """Chat message content: plain text, or ordered parts with the prompt last.
+
+    ``str`` items are text, ``bytes`` are JPEG frames and ``Video`` is a clip,
+    in the same order the Gemini callers pass their parts.
+    """
+    if not media:
+        return prompt
+    parts = []
+    for item in media:
+        if isinstance(item, Video):
+            parts.append({"type": "video_url",
+                          "video_url": {"url": _data_url(item.mime_type, item.data)}})
+        elif isinstance(item, (bytes, bytearray)):
+            parts.append({"type": "image_url",
+                          "image_url": {"url": _data_url("image/jpeg", bytes(item))}})
+        elif isinstance(item, str):
+            parts.append({"type": "text", "text": item})
+        else:
+            raise TypeError(f"unsupported media part: {type(item).__name__}")
+    parts.append({"type": "text", "text": prompt})
+    return parts
 
 
 def describe() -> Optional[dict]:
@@ -116,6 +175,7 @@ def _is_format_rejection(resp: httpx.Response) -> bool:
 
 
 def generate_json(prompt: str, schema: Type[BaseModel], model: Optional[str] = None,
+                  media: Optional[Sequence[MediaPart]] = None,
                   ) -> Tuple[dict, Optional[dict]]:
     """One chat completion that must come back as JSON matching ``schema``.
 
@@ -130,7 +190,7 @@ def generate_json(prompt: str, schema: Type[BaseModel], model: Optional[str] = N
     model = model or model_name()
     messages = [
         {"role": "system", "content": "You answer with a single JSON object and nothing else."},
-        {"role": "user", "content": prompt},
+        {"role": "user", "content": _content(prompt, media)},
     ]
     last_rejection: Optional[str] = None
     with _client() as client:
@@ -168,15 +228,19 @@ def generate_json(prompt: str, schema: Type[BaseModel], model: Optional[str] = N
     validated = schema.model_validate(parsed).model_dump()
 
     usage = data.get("usage") or {}
+    # Gateways that bill per call (OpenRouter) report the charge in
+    # ``usage.cost``; a local server reports none and stays at zero.
+    billed = usage.get("cost")
+    details = usage.get("completion_tokens_details") or {}
     cost = {
         "input_tokens": int(usage.get("prompt_tokens") or 0),
         "output_tokens": int(usage.get("completion_tokens") or 0),
-        "thinking_tokens": 0,
+        "thinking_tokens": int(details.get("reasoning_tokens") or 0),
         "input_cost": 0.0,
         "output_cost": 0.0,
-        "total_cost": 0.0,
+        "total_cost": float(billed) if isinstance(billed, (int, float)) else 0.0,
         "model": model,
         "price_estimated": False,
-        "local": True,
+        "local": not isinstance(billed, (int, float)),
     }
     return validated, cost

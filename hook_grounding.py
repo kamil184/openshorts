@@ -122,7 +122,18 @@ def frames_at(video_path, times, width=None):
 
 
 def _ask_gemini(frames, prompt, api_key):
-    """One vision call; returns the parsed dict. Split out so tests can stub it."""
+    """One vision call; returns the parsed dict. Split out so tests can stub it.
+
+    Goes to the OpenAI-compatible vision model when ``LLM_BASE_URL`` is set,
+    otherwise to Gemini with ``api_key``."""
+    import llm_backend
+    if llm_backend.active():
+        import gemini_worker
+        answer, _ = llm_backend.generate_json(
+            prompt, gemini_worker.GroundedHook,
+            model=llm_backend.vision_model(), media=frames)
+        return answer or {}
+
     from google import genai
     from google.genai import types as genai_types
     import gemini_worker
@@ -145,10 +156,11 @@ def reground(clip_path, clip, transcript, start, end) -> Optional[dict]:
     """Rewrite ``clip['viral_hook_text']`` / ``video_title_for_youtube_short``
     in place from the clip's frames. Returns what changed (also stored under
     ``clip['hook_grounding']``), or None when skipped or failed."""
+    import llm_backend
     api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        print("   🪝 Hook grounding skipped: needs a Gemini key (frames), "
-              "keeping the transcript hook.")
+    if not api_key and not llm_backend.active():
+        print("   🪝 Hook grounding skipped: needs a vision model (Gemini key or "
+              "LLM_BASE_URL), keeping the transcript hook.")
         return None
     try:
         import gemini_worker

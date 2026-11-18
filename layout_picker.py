@@ -199,23 +199,33 @@ def pick(video_path, video_duration):
     """
     if not ENABLED:
         return "none"
+    import llm_backend
+    use_llm = llm_backend.active()
     api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if not use_llm and not api_key:
         return "none"
 
-    model_name = os.environ.get("GEMINI_MODEL") or 'gemini-3.1-flash-lite'
-    print("🎛️  Choosing a layout for this video…")
+    model_name = (llm_backend.vision_model() if use_llm
+                  else os.environ.get("GEMINI_MODEL") or 'gemini-3.1-flash-lite')
+    print(f"🎛️  Choosing a layout for this video ({model_name})…")
     try:
         # Inside the try on purpose: the contract above is that this never
         # raises, and an unimportable SDK is just one more reason to fall back.
-        from google import genai
-        from google.genai import types as genai_types
         import gemini_worker
 
         frames = sample_frames(video_path)
         if not frames:
             print("   ⚠️ No readable frames — keeping the default layout.")
             return "none"
+
+        if use_llm:
+            answer, _ = llm_backend.generate_json(
+                gemini_worker.LAYOUT_CHOICE_PROMPT, gemini_worker.LayoutChoice,
+                model=model_name, media=frames)
+            return _decision(answer)
+
+        from google import genai
+        from google.genai import types as genai_types
 
         client = genai.Client(api_key=api_key)
         parts = [genai_types.Part.from_bytes(data=b, mime_type="image/jpeg")
@@ -232,7 +242,12 @@ def pick(video_path, video_duration):
     except Exception as e:
         print(f"   ⚠️ Layout choice failed ({e}) — keeping the default layout.")
         return "none"
+    return _decision(answer)
 
+
+def _decision(answer):
+    """The validated layout name from a model answer, or "none"."""
+    answer = answer or {}
     decision = str(answer.get("layout", "none")).strip().lower()
     if decision not in VALID:
         print(f"   ⚠️ Unknown layout '{decision}' — keeping the default layout.")
