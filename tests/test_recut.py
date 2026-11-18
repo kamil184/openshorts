@@ -303,6 +303,19 @@ class TestPerformRecut:
             reframe=True, runner=self._touching_runner, subtitle_band=0.79)
         assert seen["subtitle_band"] == 0.79
 
+    def test_fast_path_keeps_the_stack_seam_of_the_input(self, tmp_path):
+        import layout_ranges
+        source = tmp_path / "clip.mp4"
+        source.write_bytes(b"x")
+        layout_ranges.write(str(source), [{"start": 0, "end": 12, "layout": "stack", "seam": 0.30}])
+        served, _clean = recut.perform_recut(
+            input_path=str(source), segments=[_seg(2, 8)],
+            output_dir=str(tmp_path), clean_name="t_clip_1.mp4",
+            runner=self._touching_runner)
+        got = layout_ranges.read(str(tmp_path / served))
+        assert got == [{"start": 0.0, "end": 6.0, "layout": "stack", "seam": 0.3}]
+        assert layout_ranges.split_ranges(got) == [(0.0, 6.0, 0.3)]
+
     def test_renderer_failure_raises_and_cleans_up(self, tmp_path):
         with pytest.raises(RuntimeError):
             recut.perform_recut(
