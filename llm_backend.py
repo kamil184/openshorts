@@ -166,6 +166,12 @@ def _response_formats(schema: Type[BaseModel]):
     yield None
 
 
+def _is_unroutable_temperature(resp: httpx.Response) -> bool:
+    """OpenRouter's 404 when ``provider.require_parameters`` leaves no endpoint
+    that accepts every sent parameter (reasoning models reject temperature)."""
+    return resp.status_code == 404 and "requested parameters" in resp.text.lower()
+
+
 def _is_format_rejection(resp: httpx.Response) -> bool:
     if resp.status_code not in (400, 422):
         return False
@@ -200,6 +206,11 @@ def generate_json(prompt: str, schema: Type[BaseModel], model: Optional[str] = N
             if fmt is not None:
                 body["response_format"] = fmt
             resp = client.post(url, json=body, headers=_headers())
+            if _is_unroutable_temperature(resp):
+                # Reasoning models take no temperature; a gateway told to
+                # require every parameter then finds no endpoint at all.
+                body.pop("temperature")
+                resp = client.post(url, json=body, headers=_headers())
             if fmt is not None and _is_format_rejection(resp):
                 # The server does not know this response_format flavour; the
                 # next loop iteration asks for a looser one.

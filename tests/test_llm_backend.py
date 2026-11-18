@@ -292,3 +292,22 @@ def test_layout_picker_falls_back_to_none_when_the_vision_call_fails(local, monk
     monkeypatch.setattr(llm_backend, "generate_json", boom)
 
     assert layout_picker.pick("video.mp4", 60) == "none"
+
+
+def test_temperature_is_dropped_when_no_endpoint_accepts_it(local, monkeypatch):
+    bodies = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if "temperature" in body:
+            return httpx.Response(404, json={"error": {
+                "message": "No endpoints found that can handle the requested parameters."}})
+        return _completion({"windows": []})
+
+    _serve(handler, monkeypatch)
+    llm_backend.generate_json("p", gemini_worker.ScoreResponse)
+
+    assert "temperature" in bodies[0]
+    assert "temperature" not in bodies[1]
+    assert bodies[1]["response_format"]["type"] == "json_schema"
