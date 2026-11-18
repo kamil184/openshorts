@@ -1,0 +1,17 @@
+# Optional: also publish the dashboard and the API on a private-network address (e.g. a Tailscale IP).
+# Self-host has no authentication, so everyone who can reach that address can submit jobs.
+# Set in the server's .env (never committed):
+#   TAILNET_IP=<address to bind>
+#   TAILNET_HOSTS=<comma-separated host names the dashboard is opened with>
+# Usage: docker compose -f docker-compose.yml -f docker-compose.homelab.yml -f docker-compose.tailnet.yml up -d
+services:
+  backend:
+    ports: !override
+      - "${TAILNET_IP:?set TAILNET_IP in .env}:8000:8000"
+
+  frontend:
+    ports: !override
+      - "127.0.0.1:5175:5173"
+      - "${TAILNET_IP:?set TAILNET_IP in .env}:5175:5173"
+    environment:
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: "${TAILNET_HOSTS:-}"
