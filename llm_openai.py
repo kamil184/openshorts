@@ -118,11 +118,12 @@ def _listed_modalities() -> dict:
     try:
         with _client() as client:
             resp = client.get(f"{base_url()}/models", headers=_headers(), timeout=30.0)
-        if resp.status_code >= 500:
-            raise ValueError(f"HTTP {resp.status_code}")
-        if resp.status_code >= 400:
+        if resp.status_code in _NO_MODEL_LIST_STATUSES:
             # The server offers no model list: a permanent answer, cached as empty.
             raise _NoModelList(f"HTTP {resp.status_code}")
+        if resp.status_code >= 400:
+            # Auth, rate limit, timeout or a server error: retried on the next call.
+            raise ValueError(f"HTTP {resp.status_code}")
         body = resp.json()
         if not isinstance(body, dict):
             raise ValueError("model list is not a JSON object")
@@ -142,8 +143,13 @@ def _listed_modalities() -> dict:
     return _modalities_cache
 
 
+# Only "this endpoint does not exist" is permanent. Anything else (401, 403,
+# 408, 429, 5xx) can change while the process runs.
+_NO_MODEL_LIST_STATUSES = frozenset({404, 405, 501})
+
+
 class _NoModelList(Exception):
-    """The server answered 4xx for the model list: nothing to retry."""
+    """The server has no model list endpoint: nothing to retry."""
 
 
 def input_modalities(model: str) -> frozenset:

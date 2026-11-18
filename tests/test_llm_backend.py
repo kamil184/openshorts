@@ -527,3 +527,39 @@ def test_frame_plan_budgets_the_shared_minimum_stretch(local, monkeypatch):
     monkeypatch.delenv("VISION_MAX_SEGMENTS", raising=False)
     monkeypatch.setattr(llm_backend, "supports", lambda model, modality: modality == "image")
     assert main.vision_plan("m") == ("frames", 60, 320)
+
+
+@pytest.mark.parametrize("status", [401, 403, 408, 429, 400])
+def test_a_refused_or_rate_limited_model_list_is_retried(local, monkeypatch, status):
+    calls = {"n": 0}
+
+    def route(request):
+        if request.url.path.endswith("/models"):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(status, json={"error": {"message": "try later"}})
+            return httpx.Response(200, json=MODELS)
+        return _completion({})
+
+    monkeypatch.setattr(llm_openai, "_client",
+                        lambda **kw: httpx.Client(transport=httpx.MockTransport(route), **kw))
+    assert llm_backend.input_modalities("meta/muse-ember") == {"text"}
+    assert llm_backend.input_modalities("meta/muse-ember") == {"text", "image", "video", "file", "audio"}
+    assert calls["n"] == 2
+
+
+@pytest.mark.parametrize("status", [404, 405, 501])
+def test_a_server_that_has_no_model_list_endpoint_is_asked_once(local, monkeypatch, status):
+    calls = {"n": 0}
+
+    def route(request):
+        if request.url.path.endswith("/models"):
+            calls["n"] += 1
+            return httpx.Response(status)
+        return _completion({})
+
+    monkeypatch.setattr(llm_openai, "_client",
+                        lambda **kw: httpx.Client(transport=httpx.MockTransport(route), **kw))
+    assert llm_backend.input_modalities("meta/muse-ember") == {"text"}
+    assert llm_backend.input_modalities("meta/muse-ember") == {"text"}
+    assert calls["n"] == 1
