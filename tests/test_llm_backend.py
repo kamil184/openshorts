@@ -148,6 +148,40 @@ def test_an_unreachable_model_list_means_text_only(local, monkeypatch):
     assert llm_backend.input_modalities("meta/muse-ember") == {"text"}
 
 
+def test_a_failed_model_list_is_retried_on_the_next_call(local, monkeypatch):
+    calls = {"n": 0}
+
+    def route(request):
+        if request.url.path.endswith("/models"):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise httpx.ConnectError("Network is unreachable")
+            return httpx.Response(200, json=MODELS)
+        return _completion({})
+
+    monkeypatch.setattr(llm_openai, "_client",
+                        lambda **kw: httpx.Client(transport=httpx.MockTransport(route), **kw))
+    assert llm_backend.input_modalities("meta/muse-ember") == {"text"}
+    assert llm_backend.input_modalities("meta/muse-ember") == {"text", "image", "video", "file", "audio"}
+    assert calls["n"] == 2
+
+
+def test_a_successful_model_list_is_fetched_once(local, monkeypatch):
+    calls = {"n": 0}
+
+    def route(request):
+        if request.url.path.endswith("/models"):
+            calls["n"] += 1
+            return httpx.Response(200, json=MODELS)
+        return _completion({})
+
+    monkeypatch.setattr(llm_openai, "_client",
+                        lambda **kw: httpx.Client(transport=httpx.MockTransport(route), **kw))
+    assert llm_backend.supports("openai/gpt-6-luna", "image")
+    assert llm_backend.supports("meta/muse-ember", "video")
+    assert calls["n"] == 1
+
+
 def test_image_model_is_none_when_the_vision_model_cannot_see(local, monkeypatch):
     _serve(lambda r: _completion({}), monkeypatch)
     assert llm_backend.image_model() is None

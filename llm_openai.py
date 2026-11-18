@@ -112,19 +112,26 @@ def _listed_modalities() -> dict:
     """``{model id: input modalities}`` from the server's model list, fetched
     once per process; empty when the server does not publish modalities."""
     global _modalities_cache
-    if _modalities_cache is None:
-        listed = {}
-        try:
-            with _client() as client:
-                resp = client.get(f"{base_url()}/models", headers=_headers(), timeout=30.0)
-            if resp.status_code < 400:
-                for entry in resp.json().get("data") or []:
-                    mods = (entry.get("architecture") or {}).get("input_modalities")
-                    if entry.get("id") and mods:
-                        listed[entry["id"]] = frozenset(map(str, mods))
-        except (httpx.HTTPError, ValueError) as e:
-            print(f"   ℹ️ Could not read the model list from {base_url()}: {e}")
-        _modalities_cache = listed
+    if _modalities_cache is not None:
+        return _modalities_cache
+    listed = {}
+    try:
+        with _client() as client:
+            resp = client.get(f"{base_url()}/models", headers=_headers(), timeout=30.0)
+        if resp.status_code >= 400:
+            raise ValueError(f"HTTP {resp.status_code}")
+        body = resp.json()
+        if not isinstance(body, dict):
+            raise ValueError("model list is not a JSON object")
+        for entry in body.get("data") or []:
+            mods = (entry.get("architecture") or {}).get("input_modalities")
+            if entry.get("id") and mods:
+                listed[entry["id"]] = frozenset(map(str, mods))
+    except (httpx.HTTPError, ValueError) as e:
+        # Not cached: the next call retries instead of treating every model as text-only.
+        print(f"   ℹ️ Could not read the model list from {base_url()}: {e}")
+        return {}
+    _modalities_cache = listed
     return _modalities_cache
 
 
