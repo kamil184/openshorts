@@ -32,7 +32,9 @@ export default defineConfig({
   server: {
     allowedHosts: [
       'openshorts.app',
-      'www.openshorts.app'
+      'www.openshorts.app',
+      // Self-host: extra host names for the dev server, comma-separated.
+      ...(process.env.VITE_EXTRA_ALLOWED_HOSTS || '').split(',').map((h) => h.trim()).filter(Boolean),
     ],
     proxy: {
       '/api': { target: backend, changeOrigin: true },

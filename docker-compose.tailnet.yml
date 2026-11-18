@@ -14,4 +14,4 @@ services:
       - "127.0.0.1:5175:5173"
       - "${TAILNET_IP:?set TAILNET_IP in .env}:5175:5173"
     environment:
-      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: "${TAILNET_HOSTS:-}"
+      VITE_EXTRA_ALLOWED_HOSTS: "${TAILNET_HOSTS:-}"
