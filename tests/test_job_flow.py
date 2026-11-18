@@ -1,0 +1,59 @@
+"""The real ``main.py`` job, end to end on a tiny source (see job_harness)."""
+import json
+import signal
+
+import pytest
+
+import job_harness as jh
+import presets
+
+pytest.importorskip("main")
+pytestmark = pytest.mark.skipif(not jh.have_tools(), reason="needs ffmpeg")
+
+PRESET = presets.validate_preset({"captions": {
+    "required_tags": ["#tag1", "#tag2"], "mention_one_of": ["CreatorOne"]}})
+
+
+@pytest.fixture()
+def model():
+    m = jh.FakeModel([jh.detail_clip()])
+    yield m
+    m.close()
+
+
+def _lines(proc):
+    for raw in iter(proc.stdout.readline, b""):
+        yield raw.decode("utf-8", "replace").rstrip()
+
+
+def test_required_tags_are_in_the_first_metadata_the_job_writes(model, tmp_path):
+    # The dashboard reads metadata.json while clips render; a job that dies
+    # mid-render must not leave descriptions without the campaign's tags.
+    env = jh.job_env(model, CLIP_PRESET_JSON=presets.preset_to_json(PRESET))
+    proc, out = jh.start_job(tmp_path, env)
+    seen = []
+    try:
+        for line in _lines(proc):
+            seen.append(line)
+            if line.startswith("   Saved metadata to"):
+                proc.send_signal(signal.SIGKILL)
+                break
+    finally:
+        proc.wait(timeout=60)
+    assert any(l.startswith("   Saved metadata to") for l in seen), "\n".join(seen)
+    clip = jh.metadata(out)["shorts"][0]
+    assert clip["video_description_for_tiktok"] == "what a round #tag1 #tag2"
+    assert clip["video_description_for_instagram"] == "what a round #tag1 #tag2"
+    assert clip["caption_issues"]
+
+
+def test_a_finished_job_keeps_tags_and_flags_missing_mentions(model, tmp_path):
+    env = jh.job_env(model, CLIP_PRESET_JSON=presets.preset_to_json(PRESET))
+    proc, out = jh.start_job(tmp_path, env)
+    log = "\n".join(_lines(proc))
+    assert proc.wait(timeout=300) == 0, log
+    clip = jh.metadata(out)["shorts"][0]
+    assert clip["video_description_for_tiktok"] == "what a round #tag1 #tag2"
+    assert any("video_title_for_youtube_short" in i for i in clip["caption_issues"])
+    assert (out / "Source_clip_1.mp4").exists()
+    assert json.dumps(clip).count("#tag1") == 2

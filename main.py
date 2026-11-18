@@ -3010,6 +3010,9 @@ if __name__ == '__main__':
             clips_data['output_format'] = output_format
             if source_subtitle_band:
                 clips_data['source_subtitle_band'] = source_subtitle_band
+            # Campaign tags go in before anything reads this file; mentions
+            # are checked again once hook grounding has rewritten titles.
+            presets.enforce_clips(clips_data['shorts'], presets.job_preset())
             metadata_file = os.path.join(output_dir, f"{video_title}_metadata.json")
             write_json_atomic(metadata_file, clips_data, indent=2)
             print(f"   Saved metadata to {metadata_file}")
@@ -3149,7 +3152,7 @@ if __name__ == '__main__':
                     print(f"   ❌ Clip {i+1} failed again: {type(e).__name__}: {e}")
 
             # Persist per-clip render results added by the workers (auto_hook)
-            # and enforce preset caption rules after hook_grounding.reground.
+            # and check preset caption rules again after hook_grounding.reground.
             active_preset = presets.job_preset()
             if active_preset:
                 presets.enforce_clips(shorts, active_preset)

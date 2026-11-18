@@ -81,7 +81,7 @@ A preset supports `clip_format`, `layouts`, `target_clips`, `clip_seconds` (`[mi
 A `captions` field left empty is an error: in YAML an unquoted `#` starts a comment, so write hashtags as `'#tag'`.
 Under `captions`, `language` overrides the copy language in the selection prompts, `required_tags` lists hashtags that must appear in TikTok and Instagram descriptions, `mention_one_of` lists creator names where at least one must appear, and `extra_instructions` appends free-form guidance to the prompt.
 See `presets.example/stream-gaming.yaml` for a generic example profile.
-At metadata finalisation in `main.py`, missing `required_tags` are appended to `video_description_for_tiktok` and `video_description_for_instagram` without modifying compliant text.
+Before `main.py` first writes the job metadata, and again after hook grounding, missing `required_tags` are appended to `video_description_for_tiktok` and `video_description_for_instagram` without modifying compliant text.
 Missing `mention_one_of` names across those descriptions or `video_title_for_youtube_short` are never invented and are recorded in `clip['caption_issues']` instead.
 
 ## Dead footage at clip edges (`dead_footage.py`)

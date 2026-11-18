@@ -290,13 +290,6 @@ class TestDeterministicEnforcement:
         assert any("video_description_for_tiktok" in item for item in issues)
         assert any("video_title_for_youtube_short" in item for item in issues)
 
-    def test_main_enforces_after_hook_grounding(self):
-        src = open(os.path.join(REPO_ROOT, "main.py"), encoding="utf-8").read()
-        reground_at = src.index("hook_grounding.reground(")
-        enforce_at = src.index("presets.enforce_clips(")
-        final_write_at = src.index("write_json_atomic(metadata_file, clips_data, indent=2)", enforce_at)
-        assert reground_at < enforce_at < final_write_at
-
 
 class TestApiProcessIntegration:
     @pytest.fixture()
