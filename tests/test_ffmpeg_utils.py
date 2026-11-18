@@ -268,10 +268,12 @@ def test_failed_gpu_cut_falls_back_to_the_cpu_decode(_cut, monkeypatch):
     assert len(fake.commands) == 2
 
 
-# --- INTERMEDIATE: the cut is decoded again at once, so NVENC spends bits, not effort ---
+# --- INTERMEDIATE: the cut is decoded again at once, so both paths spend bits, not effort ---
 
-def test_intermediate_keeps_the_cpu_settings_of_quality_fast():
-    assert video_encode_args(INTERMEDIATE) == video_encode_args(QUALITY_FAST)
+def test_intermediate_on_x264_spends_bits_not_effort():
+    args = video_encode_args(INTERMEDIATE)
+    assert args == ["-c:v", "libx264", "-preset", "veryfast", "-crf", "12"]
+    assert args != video_encode_args(QUALITY_FAST)
 
 
 def test_intermediate_on_nvenc_is_the_cheap_preset(monkeypatch):

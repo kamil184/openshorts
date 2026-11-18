@@ -20,15 +20,16 @@ QUALITY = "quality"            # was: -preset medium -crf 18
 QUALITY_FAST = "quality_fast"  # was: -preset fast -crf 18
 DELIVERY = "delivery"          # was: -preset fast -crf 22
 # A file the pipeline decodes again straight away (the cut that every render
-# reads). libx264 keeps QUALITY_FAST's settings; on NVENC it trades encoder
-# effort for bits instead, see _intermediate_nvenc_args.
+# reads). Like the NVENC branch, it trades encoder effort for bits: the cut is
+# re-decoded at once, so libx264 uses -preset veryfast -crf 12 instead of
+# polishing a temporary intermediate file.
 INTERMEDIATE = "intermediate"
 
 _X264_ARGS = {
     QUALITY: ["-c:v", "libx264", "-preset", "medium", "-crf", "18"],
     QUALITY_FAST: ["-c:v", "libx264", "-preset", "fast", "-crf", "18"],
     DELIVERY: ["-c:v", "libx264", "-preset", "fast", "-crf", "22"],
-    INTERMEDIATE: ["-c:v", "libx264", "-preset", "fast", "-crf", "18"],
+    INTERMEDIATE: ["-c:v", "libx264", "-preset", "veryfast", "-crf", "12"],
 }
 
 # NVENC -cq is not 1:1 with x264 CRF: benchmarked on the prod GPU (RTX 4000
