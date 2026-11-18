@@ -8,6 +8,9 @@ from .base import ClipFormat, ClipPlan
 DEFAULT_CAMERA_RATIO = 0.30
 MIN_CAMERA_RATIO = 0.10
 MAX_CAMERA_RATIO = 0.60
+# Top headroom above detected inset boxes, matching camera_inset.FACE_HEADROOM
+# so a face-derived box never slices off the streamer's hair.
+CAMERA_HEADROOM = 0.35
 
 
 def camera_ratio() -> float:
@@ -65,13 +68,13 @@ def _align_even_box(x: int, y: int, w: int, h: int, max_w: int, max_h: int) -> t
 
 def camera_crop_box(box: tuple[int, int, int, int], orig_w: int, orig_h: int,
                     out_w: int, cam_h: int, known_bounds: bool = False) -> tuple[int, int, int, int]:
-    """Crop rectangle for the top camera band without stretching the face.
+    """Crop rectangle for the top camera band without stretching or cropping the head.
 
     When ``known_bounds`` is True (an explicit ``GAMING_FACECAM_BOX``), the
-    crop stays inside ``box`` so gameplay HUD never leaks into the webcam band.
-    Otherwise (an estimated box from ``camera_inset.detect``), it grows to the
-    band's aspect ratio like ``inset_filtergraph``, adjusting the orthogonal
-    side if frame bounds clamp growth.
+    crop stays inside ``box`` and anchors to its top edge when trimming height
+    so full headroom inside the webcam is kept. Otherwise (an estimated box
+    from ``camera_inset.detect``), it adds ``CAMERA_HEADROOM`` above the box
+    and grows to the band's aspect ratio without losing top headroom.
     """
     bx = max(0, min(orig_w - 2, int(box[0])))
     by = max(0, min(orig_h - 2, int(box[1])))
@@ -84,7 +87,9 @@ def camera_crop_box(box: tuple[int, int, int, int], orig_w: int, orig_h: int,
             w = bw
             h = max(2, min(bh, int(round(bw / target_aspect))))
             x = bx
-            y = by + (bh - h) // 2
+            # Anchor at the top of the webcam box rather than centring: hair
+            # sits near the top border while chest/desk at the bottom can trim.
+            y = by
         else:
             h = bh
             w = max(2, min(bw, int(round(bh * target_aspect))))
@@ -96,18 +101,20 @@ def camera_crop_box(box: tuple[int, int, int, int], orig_w: int, orig_h: int,
         h = max(2, (min(by + bh - y, h) // 2) * 2)
         return _align_even_box(x, y, w, h, orig_w, orig_h)
 
-    x, y, w, h = bx, by, bw, bh
+    # Detected inset boxes from camera_inset sit close to the brow line; add
+    # top headroom before matching the band aspect so hair stays intact.
+    pad_top = int(round(bh * CAMERA_HEADROOM))
+    new_y = max(0, by - pad_top)
+    x, y, w, h = bx, new_y, bw, bh + (by - new_y)
+
     if w / float(h) < target_aspect:
         want_w = min(orig_w, int(round(h * target_aspect)))
         x = int(round(x + w / 2.0 - want_w / 2.0))
         w = want_w
         if w / float(h) < target_aspect * 0.99:
-            want_h = max(2, int(round(w / target_aspect)))
-            y = int(round(y + (h - want_h) / 2.0))
-            h = want_h
+            h = max(2, int(round(w / target_aspect)))
     else:
         want_h = min(orig_h, int(round(w / target_aspect)))
-        y = int(round(y + h / 2.0 - want_h / 2.0))
         h = want_h
         if w / float(h) > target_aspect * 1.01:
             want_w = max(2, int(round(h * target_aspect)))

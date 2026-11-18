@@ -324,9 +324,16 @@ def line_budget(font_name, font_size):
 _FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 _FONT_FILES = {"Anton": "Anton-Regular.ttf", "Impact": "Anton-Regular.ttf",
                "Montserrat ExtraBold": "Montserrat-ExtraBold.ttf"}
+# ASS script virtual grid. Keep _ASS_PLAY_RES_Y and _ASS_CENTER_X together with
+# header PlayResY below: when PlayResX is omitted, libass assumes a 4:3 script
+# canvas (384x288 for PlayResY=288) and stretches horizontal coordinates to the
+# video, so \pos(_ASS_CENTER_X, ...) stays horizontally centred on any aspect.
+_ASS_PLAY_RES_Y = 288
+_ASS_IMPLIED_PLAY_RES_X = _ASS_PLAY_RES_Y * 4 // 3  # 384 when PlayResY=288
+_ASS_CENTER_X = _ASS_IMPLIED_PLAY_RES_X // 2        # 192 horizontal midpoint
 # PlayResX that libass derives for a 9:16 frame from PlayResY 288, minus the
 # style's MarginL + MarginR (10 each).
-_LINE_UNITS = 288 * 9 / 16 - 20
+_LINE_UNITS = _ASS_PLAY_RES_Y * 9 / 16 - 20
 _font_metrics = {}
 
 
@@ -500,7 +507,8 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
         for a, b, seam in seam_ranges:
             if a <= t < b:
                 if seam is not None:
-                    return f"{{\\an5\\pos(192,{round(seam * 288, 1):g})}}"
+                    y_pos = round(seam * _ASS_PLAY_RES_Y, 1)
+                    return f"{{\\an5\\pos({_ASS_CENTER_X},{y_pos:g})}}"
                 return "{\\an5}"
         return ""
 
@@ -580,7 +588,8 @@ def generate_ass(transcript, clip_start, clip_end, output_path,
     header = (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
-        "PlayResY: 288\n"
+        # Paired with _ASS_CENTER_X / seam_prefix() above — change together.
+        f"PlayResY: {_ASS_PLAY_RES_Y}\n"
         # Measured blocks never need wrapping, so it is switched off for them:
         # a rounding difference must not bring the two-line jump back.
         f"WrapStyle: {2 if fits else 0}\n"

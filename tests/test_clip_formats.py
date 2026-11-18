@@ -178,19 +178,30 @@ class TestGamingStackGeometry:
 
     def test_camera_crop_known_bounds_never_stretches_or_spills(self):
         # 524x329 (aspect 1.59) into 1080x576 (aspect 1.875): stays inside 0..524, 407..736
+        # and anchors to the top edge of the box so the top of the head is never cut.
         cx, cy, cw, ch = gs.camera_crop_box((0, 407, 524, 329), 1920, 1080, 1080, 576, known_bounds=True)
-        assert cx >= 0 and cx + cw <= 524
-        assert cy >= 407 and cy + ch <= 736
+        assert cx == 0 and cx + cw <= 524
+        assert 407 <= cy <= 408 and cy + ch <= 736
         assert cw % 2 == 0 and ch % 2 == 0 and cx % 2 == 0 and cy % 2 == 0
         assert (cw / ch) == pytest.approx(1080 / 576, rel=0.02)
 
-    def test_camera_crop_detected_box_grows_without_stretch(self):
-        # Detected box 346x195 (1.77) into 1080x576 (1.875) -> grows width to ~366
+    def test_camera_crop_detected_box_adds_headroom_without_stretch(self):
+        # Detected box 346x195 at y=475 grows upward with CAMERA_HEADROOM (~68px)
+        # before matching 1080x576 aspect so hair/head stays inside the camera band.
         cx, cy, cw, ch = gs.camera_crop_box((0, 475, 346, 195), 1920, 1080, 1080, 576, known_bounds=False)
+        assert cy < 475
+        assert cy <= 408
+        assert cy + ch >= 475 + 195 - 4
         assert cw >= 346
         assert (cw / ch) == pytest.approx(1080 / 576, rel=0.02)
         assert 0 <= cx and cx + cw <= 1920
         assert 0 <= cy and cy + ch <= 1080
+
+        # Already pinned to the top edge: headroom clamps cleanly at y=0.
+        tcx, tcy, tcw, tch = gs.camera_crop_box((0, 0, 346, 195), 1920, 1080, 1080, 576, known_bounds=False)
+        assert tcy == 0
+        assert tcx == 0
+        assert (tcw / tch) == pytest.approx(1080 / 576, rel=0.02)
 
     def test_gameplay_crop_centred_when_clear_and_excludes_overlap(self):
         # Non-overlapping left webcam (0..524) vs centred 868px gameplay (526..1394)

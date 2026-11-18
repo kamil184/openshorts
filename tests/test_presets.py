@@ -75,6 +75,11 @@ class TestLoadAndValidate:
             ("auto_hook: 'yes'\n", "boolean"),
             ("layouts: screencast\n", "list"),
             ("clip_format: ''\n", "non-empty string"),
+            ("facecam_box: [0, 0.3, 0.2]\n", "4-item"),
+            ("facecam_box: [true, 0.3, 0.2, 0.3]\n", "finite number"),
+            ("facecam_box: [-0.1, 0.3, 0.2, 0.3]\n", "normalised 0-1"),
+            ("facecam_box: [0, 0.3, 0, 0.3]\n", "normalised 0-1"),
+            ("facecam_box: [0.8, 0.3, 0.3, 0.3]\n", "exceed 1.0"),
             ("captions:\n  language: ''\n", "language"),
             ("captions:\n  required_tags: ['#bad tag']\n", "whitespace"),
             ("captions:\n  required_tags: ['#']\n", "empty '#'"),
@@ -91,15 +96,19 @@ class TestLoadAndValidate:
         monkeypatch.delenv("CLIP_PRESET", raising=False)
         assert presets.load_active_preset() is None
 
-        _write_preset(tmp_path, "demo", "target_clips: 4\n")
+        _write_preset(tmp_path, "demo", "target_clips: 4\nfacecam_box: [0, 0.377, 0.273, 0.305]\n")
         monkeypatch.setenv("CLIP_PRESET", "demo")
-        assert presets.load_active_preset() == {"target_clips": 4}
+        assert presets.load_active_preset() == {
+            "target_clips": 4,
+            "facecam_box": [0.0, 0.377, 0.273, 0.305],
+        }
 
 
 class TestExpandJobDefaults:
     def test_expands_all_fields_and_explicit_overrides_win(self):
         preset = {
             "clip_format": "gaming_stack",
+            "facecam_box": [0.0, 0.377, 0.273, 0.305],
             "layouts": ["screencast"],
             "target_clips": 6,
             "clip_seconds": [20, 60],
@@ -107,6 +116,7 @@ class TestExpandJobDefaults:
         }
         expanded = presets.expand_job_defaults(preset, {
             "clip_format": None,
+            "facecam_box": None,
             "layouts": None,
             "target_clips": "",
             "clip_min_seconds": None,
@@ -115,6 +125,7 @@ class TestExpandJobDefaults:
         })
         assert expanded == {
             "clip_format": "gaming_stack",
+            "facecam_box": [0.0, 0.377, 0.273, 0.305],
             "layouts": ["screencast"],
             "target_clips": 6,
             "clip_min_seconds": 20,
@@ -124,6 +135,7 @@ class TestExpandJobDefaults:
 
         overridden = presets.expand_job_defaults(preset, {
             "clip_format": "custom_format",
+            "facecam_box": [0.1, 0.1, 0.2, 0.2],
             "layouts": [],
             "target_clips": 3,
             "clip_min_seconds": 12,
@@ -132,6 +144,7 @@ class TestExpandJobDefaults:
         })
         assert overridden == {
             "clip_format": "custom_format",
+            "facecam_box": [0.1, 0.1, 0.2, 0.2],
             "layouts": [],
             "target_clips": 3,
             "clip_min_seconds": 12,
@@ -305,6 +318,7 @@ class TestApiProcessIntegration:
             presets_dir,
             "gaming",
             "clip_format: gaming_stack\n"
+            "facecam_box: [0, 0.377, 0.273, 0.305]\n"
             "layouts: [screencast]\n"
             "target_clips: 6\n"
             "clip_seconds: [20, 60]\n"
@@ -350,6 +364,8 @@ class TestApiProcessIntegration:
         job = app_module.jobs.pop(resp.json()["job_id"])
         env = job["env"]
         assert env["CLIP_PRESET"] == "gaming"
+        assert env["CLIP_FORMAT"] == "gaming_stack"
+        assert env["GAMING_FACECAM_BOX"] == "0,0.377,0.273,0.305"
         assert env["SCREENCAST_LAYOUT"] == "1"
         assert env["CLIP_TARGET_MIN"] == "6" and env["CLIP_TARGET_MAX"] == "6"
         assert env["CLIP_MIN_SECONDS"] == "20.0" and env["CLIP_MAX_SECONDS"] == "60.0"
@@ -371,6 +387,7 @@ class TestApiProcessIntegration:
                 "upload_id": "u1",
                 "acknowledged": True,
                 "preset": "gaming",
+                "clip_format": "default",
                 "layouts": [],
                 "target_clips": 3,
                 "clip_min_seconds": 10,
@@ -381,6 +398,7 @@ class TestApiProcessIntegration:
         job = app_module.jobs.pop(resp.json()["job_id"])
         env = job["env"]
         assert env["CLIP_PRESET"] == "gaming"
+        assert "CLIP_FORMAT" not in env
         assert "SCREENCAST_LAYOUT" not in env
         assert env["CLIP_TARGET_MIN"] == "3" and env["CLIP_TARGET_MAX"] == "3"
         assert env["CLIP_MIN_SECONDS"] == "10.0" and env["CLIP_MAX_SECONDS"] == "60.0"
@@ -389,5 +407,16 @@ class TestApiProcessIntegration:
 
 def test_remote_worker_forwards_clip_preset():
     assert remote_worker.allowed_option("CLIP_PRESET", "stream-gaming")
-    out = remote_worker.job_options({"CLIP_PRESET": "stream-gaming", "GEMINI_API_KEY": "secret"}, {})
-    assert out == {"CLIP_PRESET": "stream-gaming"}
+    assert remote_worker.allowed_option("GAMING_FACECAM_BOX", "0,0.377,0.273,0.305")
+    out = remote_worker.job_options(
+        {
+            "CLIP_PRESET": "stream-gaming",
+            "GAMING_FACECAM_BOX": "0,0.377,0.273,0.305",
+            "GEMINI_API_KEY": "secret",
+        },
+        {},
+    )
+    assert out == {
+        "CLIP_PRESET": "stream-gaming",
+        "GAMING_FACECAM_BOX": "0,0.377,0.273,0.305",
+    }

@@ -5835,17 +5835,18 @@ async def process_endpoint(
         source_end = body.get("source_end")
         preset = body.get("preset")
 
+    facecam_box = None
     if preset is not None and (not isinstance(preset, str) or preset.strip()):
         import presets as _presets
         try:
             preset, _m = _presets.apply_request_preset(preset, {
-                "clip_format": clip_format, "layouts": layouts, "target_clips": target_clips,
+                "clip_format": clip_format, "facecam_box": None, "layouts": layouts, "target_clips": target_clips,
                 "clip_min_seconds": clip_min_seconds, "clip_max_seconds": clip_max_seconds, "auto_hook": auto_hook,
             })
         except _presets.PresetError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        clip_format, layouts, target_clips, clip_min_seconds, clip_max_seconds, auto_hook = (
-            _m["clip_format"], _m["layouts"], _m["target_clips"],
+        clip_format, facecam_box, layouts, target_clips, clip_min_seconds, clip_max_seconds, auto_hook = (
+            _m["clip_format"], _m.get("facecam_box"), _m["layouts"], _m["target_clips"],
             _m["clip_min_seconds"], _m["clip_max_seconds"], _m["auto_hook"],
         )
 
@@ -5958,6 +5959,8 @@ async def process_endpoint(
         print(f"[layouts] job={job_id} enabled={sorted(chosen)}")
     if clip_format and clip_format != "default":
         env["CLIP_FORMAT"] = clip_format
+    if facecam_box is not None:
+        env["GAMING_FACECAM_BOX"] = ",".join(f"{float(v):g}" for v in facecam_box)
 
     # Auto-hook: burn each clip's Gemini hook text during the render. Off when
     # the field is absent, so API/MCP/webhook callers keep their old output

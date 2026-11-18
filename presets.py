@@ -18,7 +18,7 @@ ACTIVE_PRESET_ENV = "CLIP_PRESET"
 
 _PRESET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _TOP_KEYS = frozenset({
-    "clip_format", "layouts", "target_clips", "clip_seconds",
+    "clip_format", "facecam_box", "layouts", "target_clips", "clip_seconds",
     "auto_hook", "captions",
 })
 _CAPTION_KEYS = frozenset({
@@ -146,6 +146,24 @@ def validate_preset(data: Any, *, name: str = "") -> dict[str, Any]:
             raise PresetValidationError("Preset 'clip_format' must be a non-empty string.")
         out["clip_format"] = cf.strip()
 
+    if data.get("facecam_box") is not None:
+        raw_box = data["facecam_box"]
+        if not isinstance(raw_box, (list, tuple)) or len(raw_box) != 4:
+            raise PresetValidationError("Preset 'facecam_box' must be a 4-item [x, y, w, h] list.")
+        parsed_box: list[float] = []
+        for coord_name, val in zip(("x", "y", "w", "h"), raw_box):
+            if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
+                raise PresetValidationError(f"Preset 'facecam_box' {coord_name} must be a finite number.")
+            parsed_box.append(float(val))
+        bx, by, bw, bh = parsed_box
+        if not (0.0 <= bx < 1.0 and 0.0 <= by < 1.0 and 0.0 < bw <= 1.0 and 0.0 < bh <= 1.0):
+            raise PresetValidationError(
+                "Preset 'facecam_box' must use normalised 0-1 coordinates with 0 <= x,y < 1 and 0 < w,h <= 1."
+            )
+        if bx + bw > 1.0 + 1e-6 or by + bh > 1.0 + 1e-6:
+            raise PresetValidationError("Preset 'facecam_box' x+w and y+h must not exceed 1.0.")
+        out["facecam_box"] = parsed_box
+
     if data.get("layouts") is not None:
         layouts_raw = data["layouts"]
         if not isinstance(layouts_raw, list):
@@ -243,6 +261,9 @@ def expand_job_defaults(
 
     if not _is_provided(out.get("clip_format")) and "clip_format" in preset:
         out["clip_format"] = preset["clip_format"]
+
+    if not _is_provided(out.get("facecam_box")) and "facecam_box" in preset:
+        out["facecam_box"] = list(preset["facecam_box"])
 
     if not _is_provided(out.get("layouts")) and "layouts" in preset:
         out["layouts"] = list(preset["layouts"])
