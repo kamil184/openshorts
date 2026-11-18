@@ -28,20 +28,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      # Everything the collected tests import at module level, WITHOUT the
-      # heavy ML stack (torch/ultralytics/mediapipe/faster-whisper) — the
-      # pipeline modules import those lazily behind their feature gates, and
-      # the tests exercise the gated-off paths. numpy+opencv cover the layout
-      # modules, fastapi/boto3/PyJWT/python-multipart cover importing app.py
-      # for the MCP endpoint tests, google-genai covers gemini_worker, asyncpg
-      # reaches the Postgres service.
+      # Test dependencies live in the `test` extra of pyproject.toml (the single
+      # source of truth). The project is not packaged, so `pip install .[test]`
+      # would need a buildable wheel; instead tomllib (stdlib on 3.11) prints the
+      # extra's requirement lines and xargs hands them to pip. The extra covers
+      # everything the collected tests import WITHOUT the heavy ML stack; the
+      # pipeline modules import torch/ultralytics/mediapipe lazily behind their
+      # feature gates, and the tests exercise the gated-off paths.
       - name: Install test dependencies
-        run: >
-          pip install pytest pillow httpx pydantic sqlalchemy greenlet numpy
-          opencv-python-headless python-dotenv google-genai fastapi boto3
-          PyJWT email-validator python-multipart asyncpg
+        run: |
+          python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml', 'rb'))['project']['optional-dependencies']['test']))" \
+            | xargs -d '\n' pip install
       - name: Run tests
         run: pytest tests/ -v
+      # Import-layer contracts from pyproject.toml, report only: the step must
+      # not fail the job while the migration is in progress. Switch to a
+      # blocking run once the contracts hold.
+      - name: Import contracts (report only)
+        if: always()
+        run: lint-imports || true
 
   frontend-build:
     runs-on: ubuntu-latest

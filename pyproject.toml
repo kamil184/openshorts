@@ -1,0 +1,81 @@
+# Server project metadata and tool configuration.
+#
+# This file does not build a wheel: the server is run from the checkout (see
+# Dockerfile and requirements*.txt, which stay the source of truth for runtime
+# deployment). The `cli/` directory has its own separate pyproject.toml for the
+# upstream `openshorts` CLI package.
+
+[project]
+name = "openshorts-server"
+version = "0.1.0"
+description = "OpenShorts server: API, job pipeline and rendering"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+# Exactly what the backend-tests job needs at import time, WITHOUT the heavy
+# ML stack. CI installs this list directly from this file (see ci.yml).
+test = [
+  "pytest",
+  "pillow",
+  "httpx",
+  "pydantic",
+  "sqlalchemy",
+  "greenlet",
+  "numpy",
+  "opencv-python-headless",
+  "python-dotenv",
+  "google-genai",
+  "fastapi",
+  "boto3",
+  "PyJWT",
+  "email-validator",
+  "python-multipart",
+  "asyncpg",
+  "pyyaml",
+  "import-linter",
+]
+# Heavy stack, documented here for reference. Versions are pinned in
+# requirements*.txt, which the Dockerfile uses; these names are unpinned.
+ml = [
+  "torch",
+  "ultralytics",
+  "mediapipe",
+  "scenedetect",
+  "yt-dlp",
+]
+
+[tool.setuptools]
+py-modules = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "e2e: end-to-end runs through the full pipeline with real media (deselected by default; run with -m e2e)",
+  "gpu: needs a CUDA device",
+  "slow: takes more than a few seconds",
+]
+addopts = "-m 'not e2e'"
+
+# Import-linter contracts (report mode in CI: `lint-imports || true`).
+# The code is still flat modules at the repo root; these express the target
+# layering rules that are checkable today.
+[tool.importlinter]
+root_packages = ["app", "main", "llm_openai", "llm_gemini", "clip_selection", "clip_formats"]
+
+[[tool.importlinter.contracts]]
+name = "Provider adapters must not import clip selection"
+type = "forbidden"
+source_modules = ["llm_openai", "llm_gemini"]
+forbidden_modules = ["clip_selection"]
+
+[[tool.importlinter.contracts]]
+name = "The API entry point must not import the pipeline monolith"
+type = "forbidden"
+source_modules = ["app"]
+forbidden_modules = ["main"]
+
+[[tool.importlinter.contracts]]
+name = "Format stages must not import the pipeline monolith"
+type = "forbidden"
+source_modules = ["clip_formats"]
+forbidden_modules = ["main"]
