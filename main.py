@@ -24,6 +24,7 @@ import mediapipe as mp
 
 import frame_sampler
 import gpu_decode
+import presets
 import prompts
 import hook_grounding
 import layout_picker
@@ -2282,16 +2283,18 @@ def get_viral_clips(transcript_result, video_duration, viewer_clips=None):
 
         # --- Pass 2: detailed clip extraction on the shortlist ---
         min_clips, max_clips = clip_count_targets(len(shortlist))
+        caption_rules = presets.caption_rules_prompt(presets.load_active_preset())
 
         def _detail_prompt_for(lo, hi):
             # A split batch keeps the full clip-count band: a short list can
             # still hold the best clips, and the model returns fewer anyway.
             def build(ws):
-                return prompts.DETAIL_PROMPT_TEMPLATE.format(
+                return prompts.format_detail_prompt(
                     video_duration=video_duration, language=language,
                     min_clips=lo, max_clips=hi,
                     min_secs=min_secs, max_secs=max_secs,
-                    windows_json=json.dumps(_payload(ws), ensure_ascii=False))
+                    windows_json=json.dumps(_payload(ws), ensure_ascii=False),
+                    caption_rules=caption_rules)
             return build
 
         shorts = _run_stage_split(model_name, shortlist,
@@ -2510,10 +2513,13 @@ def _visual_pass(model_name, mode, video_path, duration, language,
     """One vision call over one proxy file, as a video or as timestamped
     frames (``mode``). Returns ``(shorts, cost)``; ``shorts`` are clamped to
     ``[0, duration]`` of THAT file. Raises ``llm_backend.BlockedError``."""
-    prompt = prompts.VISUAL_PROMPT_TEMPLATE.format(
+    active_preset = presets.load_active_preset()
+    prompt = prompts.format_visual_prompt(
         video_duration=duration, language=language,
         min_clips=min_clips, max_clips=max_clips,
-        min_secs=min_secs, max_secs=max_secs) + (hint or "")
+        min_secs=min_secs, max_secs=max_secs,
+        caption_rules=presets.caption_rules_prompt(active_preset),
+        caption_language=presets.caption_language(active_preset)) + (hint or "")
     if mode == "frames":
         interval = max(VISION_FRAME_INTERVAL, duration / VISION_MAX_FRAMES)
         media = _proxy_frames(video_path, duration, interval)
@@ -3122,9 +3128,13 @@ if __name__ == '__main__':
                     print(f"   ❌ Clip {i+1} failed again: {type(e).__name__}: {e}")
 
             # Persist per-clip render results added by the workers (auto_hook)
-            # so the editor can see what is already burned into each clip.
-            if any('auto_hook' in c or 'hook_grounding' in c or 'pro_suggested' in c
-                   for c in shorts):
+            # and enforce preset caption rules after hook_grounding.reground.
+            active_preset = presets.load_active_preset()
+            if active_preset:
+                presets.enforce_clips(shorts, active_preset)
+            if active_preset or any(
+                    'auto_hook' in c or 'hook_grounding' in c or 'pro_suggested' in c
+                    for c in shorts):
                 # Atomic: the dashboard is already reading this file for the
                 # clips announced above (CLIP_READY).
                 write_json_atomic(metadata_file, clips_data, indent=2)

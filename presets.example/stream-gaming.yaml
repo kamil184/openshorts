@@ -1,0 +1,12 @@
+# Example campaign preset. Copy outside the repo into PRESETS_DIR and
+# customize for your campaign. Real campaign presets should not be committed.
+clip_format: gaming_stack
+layouts: [screencast]
+target_clips: 6
+clip_seconds: [20, 60]
+auto_hook: true
+captions:
+  language: en
+  required_tags: ["#tag1", "#tag2"]
+  mention_one_of: [CreatorOne, CreatorTwo]
+  extra_instructions: "Keep captions upbeat and focused on the gameplay highlight."

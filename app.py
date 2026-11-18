@@ -5793,6 +5793,7 @@ async def process_endpoint(
     max_minutes: Optional[str] = Form(None),
     source_start: Optional[str] = Form(None),
     source_end: Optional[str] = Form(None),
+    preset: Optional[str] = Form(None),
 ):
     api_key = await resolve_gemini(request)
     if not api_key and not (llm_backend.available() and not BILLING_ENABLED):
@@ -5803,6 +5804,7 @@ async def process_endpoint(
 
     ack_flag = str(acknowledged).lower() in ("1", "true", "yes")
     force_low = str(force_low_quality).lower() in ("1", "true", "yes")
+    clip_format = None
 
     # Handle JSON body manually for URL payload
     content_type = request.headers.get("content-type", "")
@@ -5826,6 +5828,22 @@ async def process_endpoint(
         max_minutes = body.get("max_minutes")
         source_start = body.get("source_start")
         source_end = body.get("source_end")
+        preset = body.get("preset")
+        clip_format = body.get("clip_format")
+
+    if preset is not None and (not isinstance(preset, str) or preset.strip()):
+        import presets as _presets
+        try:
+            preset, _m = _presets.apply_request_preset(preset, {
+                "clip_format": clip_format, "layouts": layouts, "target_clips": target_clips,
+                "clip_min_seconds": clip_min_seconds, "clip_max_seconds": clip_max_seconds, "auto_hook": auto_hook,
+            })
+        except _presets.PresetError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        clip_format, layouts, target_clips, clip_min_seconds, clip_max_seconds, auto_hook = (
+            _m["clip_format"], _m["layouts"], _m["target_clips"],
+            _m["clip_min_seconds"], _m["clip_max_seconds"], _m["auto_hook"],
+        )
 
     # Normalize output format (auto = keep pipeline default).
     if output_format not in ("vertical", "horizontal", "square"):
@@ -5916,6 +5934,8 @@ async def process_endpoint(
     # still dies before it renders anything -- the server starts and every job
     # fails instead. setdefault, so an explicit PYTHONIOENCODING still wins.
     env.setdefault("PYTHONIOENCODING", "utf-8")
+    if preset and str(preset).strip():
+        env["CLIP_PRESET"] = str(preset).strip()
 
     # Optional layouts are per job. The renderer reads these at import time in
     # the subprocess, so they must be set before Popen — same path WATERMARK
