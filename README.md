@@ -1,253 +1,87 @@
-# OpenShorts.app
+# OpenShorts
 
-**The open-source OpusClip alternative.** Turn long videos into viral 9:16 Shorts, TikToks and Reels. Self-host free (MIT) or use the hosted cloud.
-
-| | OpenShorts | OpusClip | Vizard | Klap |
-|---|---|---|---|---|
-| Open source | Yes (MIT) | No | No | No |
-| Self-hostable | Yes (Docker) | No | No | No |
-| Free without watermark | Yes, self-hosted | No | No | No |
-| API + MCP server | Yes | API | API | API |
+Open-source (MIT) tool that turns long videos into 9:16 Shorts, TikToks and Reels.
+It also generates UGC marketing videos with AI actors and YouTube titles, thumbnails and descriptions.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://opensource.org/)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](http://makeapullrequest.com)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
-[![GitHub stars](https://img.shields.io/github/stars/mutonby/openshorts?style=social)](https://github.com/mutonby/openshorts)
-[![Last Commit](https://img.shields.io/github/last-commit/mutonby/openshorts)](https://github.com/mutonby/openshorts/commits/main)
 
-**Open source AI video platform** with 3 tools in one: **Clip Generator**, **AI Shorts (UGC videos with AI actors)**, and **YouTube Studio**.
+![A podcast and the vertical clip OpenShorts makes of it: both speakers stacked, captions on the seam](screenshots/split-before-after.gif)
 
-![Your podcast, and the vertical clip OpenShorts makes of it: both speakers stacked, captions on the seam](screenshots/split-before-after.gif)
+<sub>Real OpenShorts output. Source: [Turn the Tables with Dan and Shoshana Jordan](https://www.youtube.com/watch?v=-KbQj_vboOU), Heritage of Faith, licensed CC BY.</sub>
 
-<sub>Real OpenShorts output, not a mock-up. Source: [Turn the Tables with Dan and Shoshana Jordan](https://www.youtube.com/watch?v=-KbQj_vboOU), Heritage of Faith, licensed CC BY.</sub>
+A hosted version runs at [openshorts.app](https://www.openshorts.app/); this repository is the self-hosted app.
 
-Two people on camera? OpenShorts stacks them instead of shrinking the wide shot, puts the captions on the seam where they cover nobody, and switches back to a face-tracked crop when the cut goes to one person. The AI picks the layout per video; nothing to configure.
+## Features
 
-**Cloud version:** don't want to run it yourself? [OpenShorts Cloud](https://www.openshorts.app/?ref=github) is the same software on a GPU. Free plan: your first video is clipped whole up to 60 minutes, then 20 minutes a month, with a watermark and no credit card. Paid plans from $12/mo remove the watermark and add **auto-posting** and **Autopilot** (below).
+### Clip Generator
 
-**Two ways to run it, same software either way:**
+Paste a YouTube link or upload a file and get finished 9:16 clips with captions, a hook line, a virality score and per-platform titles.
 
-|  | Self-hosted (this repo) | Hosted on [openshorts.app](https://www.openshorts.app/) |
-|---|---|---|
-| **Price** | Free forever, MIT | Free plan, paid from $12/mo |
-| **Speed** | 5 to 8 min per 8-min video on CPU | About 50s on our NVIDIA GPU |
-| **API keys** | Bring your own Gemini, ElevenLabs, fal.ai | Gemini included, nothing to set up |
-| **Watermark / limits** | None, ever | Watermark and 20 min/mo on the free plan, neither on paid |
-| **Auto-posting** | With your own Upload-Post account | Paid plans: connect TikTok, Instagram, YouTube, Facebook, LinkedIn, Threads and Bluesky once, post or schedule from the app |
-| **Autopilot** | Not included | Paid plans: every new video on your channel becomes scheduled shorts |
-| **Setup** | Docker, 8GB+ RAM, model downloads | Sign in and paste a link |
-| **MCP / API for agents** | Same `/mcp` endpoint, but only while your machine is on | Always-on endpoint at [mcp.openshorts.app](https://www.openshorts.app/mcp), API keys in one click |
-| **Your data** | Your server | Ours |
-
-Self-hosting is genuinely free and always will be. It costs you a machine, your own API keys and the time to keep it running. The hosted plans exist to cover that hardware and those keys.
-
-**Compared to Opus Clip, Klap, Vizard** (public pricing pages, checked October 2026; full breakdown at [openshorts.app/alternatives](https://www.openshorts.app/alternatives)):
-
-| | Free plan | Paid from | Open source |
-|---|---|---|---|
-| **OpenShorts** | Self-hosted: free, no watermark, no cap. Cloud: first video up to 60 min, then 20 min/mo, watermarked | $12/mo (Cloud, 100 min) | **Yes, MIT** |
-| **Opus Clip** | 60 min/mo, watermarked, export within 3 days | $15/mo (Starter, 150 min), billed per minute of source | No |
-| **Klap** | 1 video to try, no ongoing free plan | $14/mo billed yearly (100 clips), billed per clip | No |
-| **Vizard** | 60 min/mo, 720p, watermarked | $14.50/mo billed yearly ($29 monthly), billed per minute uploaded | No |
-
-### Video: the story behind OpenShorts Cloud
-[![Launching the paid plan of an open source app](https://img.youtube.com/vi/Bf5z-Wh9QxM/maxresdefault.jpg)](https://www.youtube.com/watch?v=Bf5z-Wh9QxM "Watch on YouTube")
-
-*In Spanish. Click the image to watch on YouTube.*
-
----
-
-## What's Inside
-
-### 1. Clip Generator
-Paste a YouTube link or upload a file. OpenShorts finds the strongest moments of a podcast, webinar, stream or interview and returns finished 9:16 clips: reframed, captioned, with a hook line, a virality score and titles for each platform.
+- **Moment picking**: the transcript and scene boundaries are scored by Gemini (`gemini-3.1-flash-lite` by default) or any OpenAI-compatible model ([local LLM](#run-without-a-google-key)); 15-60 s clips by default.
+- **Reframing per scene**: TRACK (MediaPipe + YOLOv8 face tracking), GENERAL (blurred background), SPLIT (two speakers stacked, captions on the seam) and SCREENCAST (screen over presenter).
+  The layout is picked per video or forced from the dashboard.
+- **Gaming stack**: `clip_format=gaming_stack` renders the whole clip as webcam on top (30%) over a centred gameplay crop (70%); see [Presets and clip formats](#presets-and-clip-formats).
+- **Dead-footage trimming**: clip edges move off loading screens, black and frozen frames, never mid-word.
+- **Captions**: faster-whisper (or Parakeet on GPU) with word-level timestamps, burned in.
+  Every clip ships with the `default` look (Poppins ExtraBold, sentence case, yellow active word); `classic` (Anton uppercase), `talking` (dimmed inactive words, orange accent) and other presets are available in the editor and via `/api/subtitle`.
+- **Hooks**: an opening line written from what is said in the clip, in the box-free `headline` style by default (also `pill`, `classic`, `dark`, `yellow`, `red`, `outline`, `outline_yellow`).
+- **Clip editor**: source and program monitors with the transcript; click a word to cut, add segments, change framing and re-render.
+- **Dubbing** (ElevenLabs, 30+ languages) and Gemini-generated FFmpeg effects.
 
 ![A clip with its viral score, titles and edit actions](dashboard/public/screens/app-clipcard.webp)
 
-Every clip opens in a real editor: source and program monitors side by side with the full transcript. Click a word to set a cut, add segments, change the framing and re-render in seconds.
+### AI Shorts (UGC videos)
 
-![The clip editor with source monitor, program monitor, transcript and segments](dashboard/public/screens/app-editor.webp)
+Describe a product or paste a URL: script (Gemini), actor (Flux 2 Pro or the gallery), voice (ElevenLabs), talking head (Hailuo 2.3 Fast + VEED Lipsync, or Kling Avatar v2 in Premium), b-roll with Ken Burns, FFmpeg composite with subtitles.
+Roughly $0.65 per video in Low Cost mode and $2 in Premium, in fal.ai and ElevenLabs usage.
 
-### 2. Autopilot (Cloud)
-Connect your YouTube channel and publish as usual. Every new video is clipped on its own, you get an email when the clips are ready, and with autopublish on the best ones go out to your socials (TikTok, Instagram, YouTube, Facebook, LinkedIn, Threads and Bluesky), one a day at the hour you pick. Paid plans only.
+### YouTube Studio
 
-![Autopilot settings](dashboard/public/screens/autopilot-settings.webp)
+Ten title options with a refinement chat, thumbnails with your face over a background, descriptions with chapter timestamps, and publishing to YouTube.
 
-### 3. AI Shorts (UGC Video Creator)
-Generate marketing videos with AI actors for **any product or business**. No camera, no studio, no influencer budget. Describe your product or paste a URL.
+### Publishing
 
-![The UGC gallery with AI actor videos](dashboard/public/screens/app-ugc.webp)
+Post or schedule clips to TikTok, Instagram, YouTube, Facebook, LinkedIn, Threads and Bluesky through [Upload-Post](https://www.upload-post.com) with your own API key.
 
-- **Two cost modes**: Low Cost (~$0.65/video) and Premium (~$2/video)
-- AI actors with lip-sync, voiceover, b-roll and TikTok-style subtitles
-- Pick an avatar from the shared gallery or upload your own photo
-- Every video lands in the public gallery ([openshorts.app/gallery](https://openshorts.app/gallery)) with its own SEO page
+## Getting started
 
-### 4. YouTube Studio
-AI titles (10 options with a refinement chat), thumbnails with your face over a background, descriptions with chapter timestamps, and one-click publishing to YouTube.
+Requirements: Docker with Compose, 8 GB+ RAM.
+API keys are entered in the dashboard's Settings and stored encrypted in the browser:
 
-### 5. Inside Claude and ChatGPT
-Add OpenShorts to Claude or ChatGPT with one URL and ask for clips in plain language: same pipeline, same minutes, no API key to manage. See [Automate it](#automate-it-mcp-server-rest-api-and-webhooks).
+| Key | Needed for |
+|---|---|
+| Google Gemini ([get one](https://aistudio.google.com/app/apikey)) | Clipping (unless `LLM_BASE_URL` is set), AI Shorts scripts, YouTube Studio |
+| fal.ai | AI Shorts |
+| ElevenLabs | Voiceover and dubbing |
+| Upload-Post | Social posting |
 
-![Connecting OpenShorts to an AI agent](dashboard/public/screens/connect-an-agent.webp)
-
----
-
-## Key Features
-
-### Clip Generator
-- **Viral Moment Detection**: Google Gemini 3.1 Flash-Lite ranks the transcript and scene boundaries to pick 3-15 moments of 15-60 seconds, each with a virality score
-- **Runs fully local if you want**: point `LLM_BASE_URL` at Ollama, LM Studio, vLLM or any OpenAI-compatible server and the moment picker runs on your own model, no Google key needed (see [Run without a Google key](#6-run-without-a-google-key-local-llm-optional))
-- **Smart 9:16 Reframing**: per scene: TRACK (MediaPipe + YOLOv8 face tracking), GENERAL (blurred background), SPLIT (two speakers stacked, captions on the seam) and SCREENCAST (screen over presenter); the layout is picked per video by Gemini or forced from the dashboard
-- **Captions**: faster-whisper (or Parakeet on GPU) with word-level timestamps, several caption styles, burned into the clip
-- **Clip editor**: word-level cuts, extra segments, framing changes and fast re-renders
-- **Hook overlays**: an opening line written from what is said in the clip, editable in text, style, font and position
-- **AI Voice Dubbing**: ElevenLabs, 30+ languages with voice cloning (bring your own ElevenLabs key, on the Cloud too)
-- **AI Video Effects**: Gemini-generated FFmpeg filters
-
-### Social Auto-Publishing (via [Upload-Post](https://www.upload-post.com))
-- **Post a clip to TikTok, Instagram, YouTube, Facebook, LinkedIn, Threads and Bluesky at once**, or schedule it for any date and time
-- **Schedule a week**: spread a batch of clips across the coming days in one go
-- **Post analytics**: views of the clips you published from OpenShorts, in the app
-- On the Cloud it is wired up on every paid plan; self-hosted, paste your own Upload-Post key
-- **Only want to post videos you already have, without clipping?** Use [Upload-Post](https://www.upload-post.com) directly: TikTok, Instagram, YouTube, LinkedIn, Facebook, X, Threads, Pinterest, Bluesky and more, with a free plan, a REST API and an MCP server
-
-### AI Shorts Pipeline
-1. **Analyze**: Scrape website URL + web research, or generate from manual description
-2. **Script**: AI writes viral scripts (hook - problem - solution - CTA format)
-3. **Actor**: Generate AI actors with Flux 2 Pro or select from shared gallery
-4. **Voice**: ElevenLabs TTS voiceover (English/Spanish, male/female)
-5. **Video**: Talking head generation (Hailuo 2.3 Fast img2video + VEED Lipsync, or Kling Avatar v2 in Premium)
-6. **B-roll**: AI-generated visuals with Ken Burns effect
-7. **Composite**: FFmpeg final assembly with subtitles and hook overlays
-8. **Publish**: Direct posting to TikTok, Instagram Reels, YouTube Shorts via Upload-Post
-
-### Infrastructure
-- S3-compatible storage for clip backup and the public gallery
-- SEO gallery pages served by FastAPI with JSON-LD structured data
-- Async job queue with configurable concurrency, and optional NVIDIA GPU rendering (NVENC)
-
----
-
-## Who Is This For?
-
-- **Content creators** — Turn long videos into shorts automatically, publish to all platforms at once, or let Autopilot do it for every new upload
-- **Marketing agencies** — Generate UGC videos for clients at scale, no actors or studios needed
-- **SaaS founders** — Create product demos and marketing shorts from just a URL
-- **E-commerce brands** — Product videos with AI actors for TikTok Shop, Instagram, YouTube
-- **Local businesses** — Restaurants, gyms, real estate, coaching — affordable video marketing
-- **Developers** — Self-host, customize the pipeline, integrate via API
-
----
-
-## AI Shorts Showcase
-
-Videos generated with OpenShorts AI Shorts — no camera, no studio, no actors:
-
-| | | |
-|:---:|:---:|:---:|
-| [![Biohacking for Investors](https://test-videos-upload-post.s3.eu-west-3.amazonaws.com/videos/cdceec1b/actor.png)](https://openshorts.app/video/cdceec1b) | [![Secret Weapon for Devs](https://test-videos-upload-post.s3.eu-west-3.amazonaws.com/videos/d3a80b6b/actor.png)](https://openshorts.app/video/d3a80b6b) | [![El Secreto de los Agentes de IA](https://test-videos-upload-post.s3.eu-west-3.amazonaws.com/videos/8ab7de92/actor.png)](https://openshorts.app/video/8ab7de92) |
-| **Biohacking for Investors** · LOW COST | **Secret Weapon for Devs** · LOW COST | **El Secreto de los Agentes de IA** · PREMIUM |
-
-> Browse all videos at [openshorts.app/gallery](https://openshorts.app/gallery)
-
----
-
-## OpenShorts vs Competitors
-
-| Feature | OpenShorts | Opus Clip | CapCut | Vizard | Klap | Descript |
-|---------|:---:|:---:|:---:|:---:|:---:|:---:|
-| **Price** | **Free self-hosted**<br>from $12/mo hosted | $15-29/mo | $8/mo | $14.50/mo yearly<br>$29 monthly | from $14/mo yearly | $24-65/mo |
-| **Self-hosted** | **Yes** | No | No | No | No | No |
-| **Open source** | **Yes** | No | No | No | No | No |
-| **Watermark** | **Never self-hosted**<br>free plan only when hosted | Free tier | Some | Free tier | No free plan<br>(1 trial video) | Free tier |
-| **Upload limits** | **None self-hosted**<br>by plan when hosted | 10-30GB | Credit-based | 60min-10hr | 10-100 vids/mo | 60min-40hr |
-| **AI clip detection** | Yes | Yes | Yes | Yes | Yes | Yes |
-| **Smart 9:16 reframing** | Yes | Yes | Yes | Yes | Yes | No |
-| **Auto subtitles** | Yes | Yes | Yes | Yes | Yes | Yes |
-| **Voice dubbing (30+ langs)** | Yes, with your ElevenLabs key | No | Pro only | No | Pro only | Business only |
-| **AI UGC actors** | **Yes** | No | No | No | No | No |
-| **AI video effects** | Yes | No | Yes | No | No | No |
-| **Hook text overlays** | Yes | No | No | No | No | No |
-| **YouTube Studio (titles, thumbnails)** | **Yes** | No | No | No | No | No |
-| **Social auto-publishing** | Yes | Pro only | TikTok only | Paid only | Paid only | No |
-| **Schedule uploads** | Yes | Pro only | No | Paid only | Paid only | No |
-| **Data privacy** | **Your server** | Their cloud | Their cloud | Their cloud | Their cloud | Their cloud |
-| **Works with a local LLM (Ollama)** | **Yes** | No | No | No | No | No |
-
----
-
-## How Much Does It Cost?
-
-Self-hosting OpenShorts is free. You provide the machine and you only pay for the AI APIs you use, and most have generous free tiers:
-
-| Service | Free Tier | Paid Cost | Used For |
-|---------|-----------|-----------|----------|
-| **Google Gemini** | Free trial with generous limits | < $0.01 per 10-min video | Viral moment detection, script generation, web research |
-| **Local LLM (Ollama, LM Studio, vLLM...)** | **Free, your hardware** | $0 | Viral moment detection instead of Gemini (`LLM_BASE_URL`) |
-| **fal.ai** | Pay-per-use | ~$0.50-1.50 per AI Short | Actor generation, talking head video, lip-sync |
-| **ElevenLabs** | Free tier available | Pay-per-use | Voiceover, voice dubbing |
-| **Upload-Post** | **10 free uploads/month** to all networks (no credit card) | Pay-per-use | Auto-publishing to TikTok, Instagram, YouTube |
-| **AWS S3** | Optional | ~$0.023/GB | Cloud backup for clips and gallery |
-
-**Bottom line:** You can clip videos for practically free with Gemini, and publish 10 videos/month to all social networks at zero cost with Upload-Post.
-
-**Don't want to run any of that?** [openshorts.app](https://www.openshorts.app/) is the same software on our hardware: our NVIDIA GPU clips an 8-minute video in about 50 seconds instead of the 5 to 8 minutes it takes on a typical CPU, the Gemini key is included, and paid plans add auto-posting and Autopilot with nothing to set up. The free plan clips your first video whole up to 60 minutes, then 20 minutes a month, with a watermark and no credit card; paid plans start at $12/mo for 100 minutes without watermark.
-
----
-
-## Requirements
-
-- **Docker & Docker Compose**
-- **Google Gemini API Key** ([Free — get it here](https://aistudio.google.com/app/apikey)) — default clip provider; optional for clipping with a configured compatible endpoint, still required by separate Gemini features
-- **fal.ai API Key** ([Pay-per-use](https://fal.ai)) — required for AI Shorts (actor generation, video, lip-sync)
-- **ElevenLabs API Key** ([Free tier](https://elevenlabs.io)) — required for voiceover/dubbing
-- **Upload-Post API Key** ([free tier](https://upload-post.com)) — required for direct social posting
-
----
-
-## Getting Started
-
-### 1. Clone
 ```bash
 git clone https://github.com/mutonby/openshorts.git
 cd openshorts
-```
-
-### 2. Configure (optional)
-```bash
-cp .env.example .env
-# Edit .env with your AWS keys for S3 backup
-```
-
-### 3. Launch
-```bash
+cp .env.example .env   # optional: S3 backup, encoder, models
 docker compose up --build
 ```
 
-### 4. Open Dashboard
-Navigate to **`http://localhost:5175`**
+Open `http://localhost:5175`.
+The API listens on `http://localhost:8000` with OpenAPI docs at `/docs`.
 
-1. Go to **Settings** and enter your API keys (Gemini, fal.ai, ElevenLabs, Upload-Post)
-2. **Clip Generator**: Upload a long-form video to generate viral shorts
-3. **AI Shorts**: Describe your product or paste a URL to generate UGC marketing videos
-4. **YouTube Studio**: Generate thumbnails, titles, and descriptions for YouTube
-5. **UGC Gallery**: Browse all generated videos and avatars
-6. **AI Agent**: Drop vertical videos in a folder and an agent skill picks, edits and queues clips for your approval
+### GPU acceleration (NVIDIA, optional)
 
-### 5. GPU acceleration (optional, NVIDIA)
+The default image is CPU-only: an 8-minute video takes 5 to 8 minutes, about one minute with an NVENC-capable card.
 
-The default image is CPU-only. With an NVIDIA card (any card with NVENC, e.g. RTX 4060) an 8-minute video clips in about a minute instead of 5 to 8. Nothing is passed through in the VM sense — the container just gets access to the host GPU.
+Install the NVIDIA driver and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) on the host:
 
-**Host:** install the NVIDIA driver (`nvidia-smi` must work) and the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html):
 ```bash
 sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker
 docker run --rm --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi   # sanity check
 ```
-On Windows use Docker Desktop with the WSL2 backend and the Windows NVIDIA driver; no driver inside WSL.
 
-**Compose:** create `docker-compose.override.yml` next to `docker-compose.yml` (picked up automatically). `GPU: "1"` adds cuBLAS/cuDNN and onnxruntime-gpu to the image (~2 GB); `video` is required for NVENC.
+On Windows use Docker Desktop with the WSL2 backend and the Windows NVIDIA driver.
+
+Create `docker-compose.override.yml` next to `docker-compose.yml`.
+`GPU: "1"` adds cuBLAS/cuDNN and onnxruntime-gpu (~2 GB); the `video` capability is required for NVENC.
+
 ```yaml
 services:
   backend:
@@ -264,254 +98,177 @@ services:
               capabilities: [gpu, video]
 ```
 
-**`.env`:**
+Then in `.env`:
+
 ```
 WHISPER_MODEL=large-v3-turbo
 WHISPER_DEVICE=cuda
 WHISPER_COMPUTE=float16
 FFMPEG_ENCODER=auto           # probes h264_nvenc at startup, falls back to x264
-TRANSCRIBE_BACKEND=parakeet   # optional: ~2x faster than whisper, 25 European languages, auto-falls back to whisper
+TRANSCRIBE_BACKEND=parakeet   # optional: ~2x faster, 25 European languages, falls back to whisper
 ASR_GPU_CONCURRENCY=1
 ```
 
-**Verify:**
+Verify:
+
 ```bash
 docker compose up --build -d
 docker exec openshorts-backend nvidia-smi -L
 docker exec openshorts-backend ffmpeg -hide_banner -f lavfi -i testsrc=size=256x256:rate=1 -frames:v 1 -c:v h264_nvenc -f null -
 ```
-The backend log on the first job reports the chosen encoder and transcription device. A CUDA error in whisper (e.g. VRAM exhausted) retries once on CPU automatically. 8 GB of VRAM is enough for `large-v3-turbo` fp16 plus the detection models.
 
----
+The first job's log reports the chosen encoder and transcription device.
+A CUDA error in whisper retries once on CPU.
+8 GB of VRAM fits `large-v3-turbo` fp16 plus the detection models.
 
-### 6. Run without a Google key (local LLM, optional)
+### Run without a Google key
 
-The clip pipeline routes transcript scoring, titles and visual checks through one model interface.
-Point `LLM_BASE_URL` at an OpenAI-compatible endpoint and the dashboard no longer requires a Google key for clipping.
-Use a local endpoint to keep those model calls on your own hardware.
+Set `LLM_BASE_URL` to an OpenAI-compatible `/v1` endpoint (Ollama, LM Studio, vLLM, llama.cpp server, LocalAI, OpenRouter) and clipping no longer needs a Gemini key.
 
 ```bash
-# .env: set LLM_BASE_URL to your endpoint's /v1 URL
+LLM_BASE_URL=http://localhost:11434/v1
 LLM_MODEL=qwen2.5:14b
-# LLM_API_KEY=...              # only if your endpoint requires a bearer token
+# LLM_API_KEY=...              # only if the endpoint checks a bearer token
 # LLM_VISION_MODEL=vision-model
 # LLM_VIDEO_MODEL=video-model
 # LLM_INPUT_MODALITIES={"vision-model":["text","image"]}
 ```
 
-Works with Ollama, LM Studio, vLLM, llama.cpp server, LocalAI and OpenRouter.
-`LLM_MODEL` handles text; `LLM_VISION_MODEL` defaults to it, and `LLM_VIDEO_MODEL` defaults to the vision model.
-Capabilities come from the endpoint's `/models` response (`architecture.input_modalities`), with explicit overrides in `LLM_INPUT_MODALITIES` for endpoints that do not publish them.
-Unknown capabilities mean text-only.
+- `LLM_VISION_MODEL` defaults to `LLM_MODEL`, and `LLM_VIDEO_MODEL` to the vision model.
+- Capabilities come from the endpoint's `/models` response (`architecture.input_modalities`); `LLM_INPUT_MODALITIES` overrides them, and unknown means text-only.
+- Layout picking, screen detection, subtitle-band detection and hook grounding need an image-capable model and skip or fall back without one.
+  Silent footage uses video input if supported, otherwise timestamped frames; a text-only model cannot clip it.
+- Scoring sends three transcript windows per call (eight for Gemini; `LLM_SCORE_BATCH` overrides).
+  With Ollama, raise the context (`OLLAMA_CONTEXT_LENGTH=16384` or `num_ctx`) to avoid silent truncation.
+- `LLM_BASE_URL` takes precedence over `GEMINI_API_KEY`; `LLM_PROVIDER=openai|gemini` forces one.
+  The editor, thumbnail and standalone generation features still use their own provider keys.
 
-- **Context length.** Scoring defaults to three transcript windows per call for compatible endpoints, versus eight for Gemini.
-  The detail pass can carry more windows, so size the context for it too.
-  With Ollama, set `OLLAMA_CONTEXT_LENGTH=16384` or `num_ctx` in a Modelfile to avoid silent truncation.
-  `LLM_SCORE_BATCH` overrides the scoring batch size.
-- **Visual tasks.** Layout picking, screen detection, subtitle-band detection and hook grounding require an image-capable vision model and skip or fall back when unavailable.
-  Silent footage uses video input if supported, otherwise timestamped frames; a text-only video-task model cannot clip it.
-  `VISION_*` settings below control sampling and coverage.
-- **Provider selection.** `LLM_BASE_URL` takes precedence over `GEMINI_API_KEY`; adding a Gemini key does not send visual stages to a second provider.
-  `LLM_PROVIDER=openai` or `gemini` explicitly selects the provider.
-  With only a Gemini key, the default model remains `GEMINI_MODEL` or `gemini-3.1-flash-lite`.
-  `LLM_EXTRA_BODY` supplies optional JSON request fields for compatible endpoints, such as reasoning effort or gateway routing.
-  The separate editor, thumbnail and standalone generation features still require their existing provider keys.
+## Presets and clip formats
 
-## Technical Pipeline
+A preset is a YAML file of job defaults, named by the `preset` field of `POST /api/process`.
+Presets are read from the directory in `PRESETS_DIR` (on the backend, so mount it into the container); keep real ones outside the repository.
+See [`presets.example/stream-gaming.yaml`](presets.example/stream-gaming.yaml):
 
-### Clip Generator
-1. **Ingest** — YouTube URL (yt-dlp) or local upload
-2. **Transcribe** — faster-whisper (or Parakeet on GPU) with word-level timestamps
-3. **Detect** — PySceneDetect for scene boundaries
-4. **Analyze** — Gemini identifies 3-15 viral moments (15-60s each)
-5. **Extract** — FFmpeg precise clip cutting
-6. **Reframe** — AI vertical cropping with subject tracking
-7. **Effects** — Subtitles, hooks, AI video effects
-8. **Publish** — S3 backup + Upload-Post social distribution
-
-### AI Shorts
-1. **Analyze** — Website scraping + Gemini web research (or manual description)
-2. **Script** — Gemini generates viral scripts with segments
-3. **Actor** — Flux 2 Pro portrait generation (or gallery/upload)
-4. **Voice** — ElevenLabs TTS voiceover
-5. **Video** — Hailuo 2.3 Fast img2video + VEED Lipsync (Low Cost) or Kling Avatar v2 (Premium)
-6. **B-roll** — Flux 2 Pro image generation + Ken Burns effect
-7. **Composite** — FFmpeg assembly with ASS subtitles and hook overlays
-8. **Gallery** — Upload to public S3 with metadata for SEO pages
-9. **Publish** — Upload-Post to TikTok, Instagram, YouTube
-
----
-
-## Automate It: MCP Server, REST API and Webhooks
-
-You don't need the dashboard. The whole pipeline is callable by AI agents and scripts.
-
-### MCP server (`/mcp`)
-
-OpenShorts ships a built-in [MCP](https://modelcontextprotocol.io) server, so Claude, ChatGPT, Cursor or any MCP client can clip and publish videos for you:
-
-**claude.ai and ChatGPT**: paste `https://mcp.openshorts.app/mcp` as a custom connector (Settings → Connectors) and approve the access on openshorts.app. The server does OAuth 2.1 with dynamic client registration, so there is no key to copy; the connection shows up under Account → API keys, where revoking it disconnects the app.
-
-```bash
-# Claude Code / Cursor / n8n (hosted): create an API key in your account page
-claude mcp add --transport http openshorts https://mcp.openshorts.app/mcp \
-  --header "Authorization: Bearer osk_..."
-
-# Self-hosted (no key needed, BYOK rules apply):
-claude mcp add --transport http openshorts http://localhost:8000/mcp
-
-# Self-hosted without running the web server: same tools over stdio
-claude mcp add openshorts -- python mcp_stdio.py
+```yaml
+clip_format: gaming_stack
+layouts: [screencast]
+target_clips: 6
+clip_seconds: [20, 60]
+auto_hook: true
+trim_dead_footage: true
+captions:
+  language: en
+  required_tags: ["#tag1", "#tag2"]
+  mention_one_of: [CreatorOne, CreatorTwo]
+  extra_instructions: "Keep captions upbeat and focused on the gameplay highlight."
 ```
 
-Tools: `process_video` (URL or `upload_id`; `captions: false` when the source already has subtitles, `auto_hook: false` to skip the hook line, burned by default like the dashboard), `create_upload` (hand the agent a local file: PUT the bytes, then process), `get_job_status`, `list_clips`, `get_quota`, `add_subtitles`, `recut_clip`, `publish_clip`. A prompt like *"clip this podcast and schedule the best 3 to TikTok"* is now a one-liner in your agent of choice.
+Allowed keys: `clip_format`, `facecam_box`, `layouts`, `target_clips`, `clip_seconds`, `auto_hook`, `trim_dead_footage`, `captions`.
+A field sent explicitly in the request overrides the preset's value.
+The `captions` rules are added to the caption prompt, and required tags and mentions are enforced on the generated descriptions.
+The validated preset is passed to the job, so later edits to the file do not affect running jobs.
 
-### REST API + API keys
+`clip_format` (request field, preset key or server-wide `CLIP_FORMAT`) is `default` or `gaming_stack`.
+`gaming_stack` puts the webcam on top (`GAMING_CAMERA_RATIO`, default 0.30) over a static centre gameplay crop; set `GAMING_FACECAM_BOX=x,y,w,h` (normalised 0-1), or `facecam_box` in a preset, to skip webcam detection.
 
-Hosted accounts can mint `osk_...` API keys (account page). A key authenticates as you everywhere — same plan, same minutes, same job ownership:
+Dead-footage trimming is on by default.
+`CLIP_DEAD_TRIM=0` or `1` overrides it for the whole server; otherwise the preset's `trim_dead_footage` decides.
+`CLIP_DEAD_TRIM_MAX_SECONDS` caps how much one edge may lose.
+
+## API, MCP and CLI
+
+### MCP server
+
+The backend serves [MCP](https://modelcontextprotocol.io) at `/mcp`:
 
 ```bash
-curl -X POST https://api.openshorts.app/api/process \
-  -H "Authorization: Bearer osk_..." -H "Content-Type: application/json" \
+claude mcp add --transport http openshorts http://localhost:8000/mcp   # self-hosted, no key
+claude mcp add openshorts -- python mcp_stdio.py                       # stdio, no web server needed
+```
+
+The hosted endpoint is `https://mcp.openshorts.app/mcp`, with an `osk_...` key as `Authorization: Bearer` or OAuth from claude.ai and ChatGPT connectors.
+
+Tools: `process_video` (URL or `upload_id`; `captions: false` when the source already has subtitles, `auto_hook: false` to skip the hook), `create_upload` (PUT a local file, then process), `get_job_status`, `list_clips`, `get_quota`, `add_subtitles`, `recut_clip`, `publish_clip`.
+
+### REST API and webhooks
+
+```bash
+curl -X POST http://localhost:8000/api/process \
+  -H "Content-Type: application/json" \
   -d '{"url": "https://youtube.com/watch?v=...", "acknowledged": true,
-       "webhook_url": "https://your-server.com/hooks/openshorts"}'
+       "preset": "stream-gaming",
+       "webhook_url": "https://your-server.example/hooks/openshorts"}'
 ```
 
-Interactive docs at `/docs` (OpenAPI) on any instance.
-
-### Completion webhooks
-
-Pass `webhook_url` (and optionally `webhook_secret`) to `POST /api/process` and you get exactly one `POST` when the job reaches a terminal state — no polling loops in your n8n / Zapier / cron pipelines:
+`acknowledged: true` confirms you have the rights to the source.
+With `webhook_url` (and optional `webhook_secret`) the job sends exactly one `POST` when it finishes:
 
 ```json
 {"event": "job.completed", "job_id": "…",
  "clips": [{"index": 0, "title": "…", "video_url": "…", "download_url": "…"}]}
 ```
 
-With a secret, the body is signed: `X-OpenShorts-Signature: sha256=<hmac-sha256(body)>`.
+`event` is `job.failed` on failure.
+With a secret the body is signed: `X-OpenShorts-Signature: sha256=<hmac-sha256(body)>`.
 
 ### CLI
 
-The same API from the terminal, zero dependencies (`cli/`):
-
 ```bash
 pip install openshorts   # or: uvx openshorts
-
-export OPENSHORTS_API_KEY=osk_...              # hosted
-# export OPENSHORTS_API_URL=http://localhost:8000   # self-hosted, no key
-
+export OPENSHORTS_API_URL=http://localhost:8000   # self-hosted; or OPENSHORTS_API_KEY=osk_... for hosted
 openshorts process "https://youtube.com/watch?v=..." --wait
 openshorts clips <job_id>
 openshorts publish <job_id> 0 --platforms tiktok,youtube
 ```
 
-### Agent skill
+See [`cli/README.md`](cli/README.md).
 
-`skills/openshorts/SKILL.md` follows the open
-[Agent Skills](https://agentskills.io) standard, so it works in any
-skill-capable agent:
+### Agent skill and n8n
 
-```bash
-# Claude Code (and most agents): copy the folder into the skills directory
-cp -r skills/openshorts ~/.claude/skills/
+[`skills/openshorts/`](skills/openshorts/) is an [Agent Skills](https://agentskills.io) skill: copy it into your agent's skills directory (for Claude Code, `~/.claude/skills/`).
+An importable n8n workflow lives in [`examples/n8n/`](examples/n8n/).
 
-# Hermes Agent: install straight from this repo
-hermes skills install mutonby/openshorts/skills/openshorts
+## Server configuration
 
-# OpenClaw: from ClawHub
-openclaw skills install @mutonby/openshorts
-```
+Set in `.env`; [`.env.example`](.env.example) documents the full list.
 
-### n8n
-
-An importable workflow (video URL in, published-ready clips out, no polling)
-lives in [`examples/n8n/`](examples/n8n/).
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.11, FastAPI, google-genai, faster-whisper, ultralytics (YOLOv8), mediapipe, opencv-python, yt-dlp, FFmpeg, httpx |
-| Frontend | React 18, Vite 4, Tailwind CSS 3.4 |
-| AI APIs | Google Gemini, fal.ai (Flux, Hailuo, VEED, Kling), ElevenLabs |
-| Infrastructure | Docker + Docker Compose, AWS S3 |
-| Publishing | Upload-Post API (TikTok, Instagram, YouTube) |
-
----
-
-## Environment Variables
-
-**Server-side (.env):**
 | Variable | Description |
-|----------|------------|
-| `AWS_ACCESS_KEY_ID` | AWS access key for S3 |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret key |
-| `AWS_REGION` | AWS region (default: us-east-1) |
+|---|---|
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | S3 credentials (optional) |
+| `AWS_REGION` | S3 region |
 | `AWS_S3_BUCKET` | Private bucket for clip backup |
-| `AWS_S3_PUBLIC_BUCKET` | Public bucket for gallery/avatars |
-| `MAX_CONCURRENT_JOBS` | Concurrent processing limit (default: 5) |
-| `LLM_BASE_URL` | OpenAI-compatible endpoint for clip-pipeline model calls; makes the Gemini key optional for clipping |
-| `LLM_MODEL` | Text-task model (compatible default `llama3.1:8b`; Gemini default from `GEMINI_MODEL`) |
-| `LLM_API_KEY` | Bearer token for that server, if it checks one |
-| `LLM_SCORE_BATCH` | Transcript windows per scoring call (default 3 local, 8 Gemini) |
-| `LLM_PROVIDER` | Explicit provider: `openai` or `gemini`; otherwise compatible endpoint first, then Gemini |
-| `LLM_VISION_MODEL` | Image-task model; defaults to `LLM_MODEL` |
-| `LLM_VIDEO_MODEL` | Silent-footage model; defaults to `LLM_VISION_MODEL` |
-| `LLM_INPUT_MODALITIES` | JSON mapping of model IDs to input modality lists; overrides `/models` capabilities |
-| `LLM_EXTRA_BODY` | JSON object of extra compatible-endpoint request fields |
-| `LLM_TIMEOUT` | Compatible-endpoint request timeout in seconds (default 600) |
-| `VISION_FRAME_INTERVAL` | Seconds between stills for image input (default 2; minimum 1) |
-| `VISION_MAX_FRAMES` | Maximum stills per stretch (default 120; minimum 1) |
-| `VISION_MAX_SECONDS` | Approximate watched-duration budget (default 19200); rounded up to whole stretches |
-| `VISION_SEGMENT_SECONDS` | Stretch-size override; default 2400 for Gemini video, 600 for compatible video, interval × frame count for images; shared minimum 60 |
-| `VISION_MAX_SEGMENTS` | Explicit stretch-count limit; otherwise calculated from coverage budget and stretch size |
+| `AWS_S3_PUBLIC_BUCKET` | Public bucket for the gallery and avatars |
+| `MAX_CONCURRENT_JOBS` | Jobs processed at once (default 5) |
+| `JOB_RETENTION_SECONDS` | How long finished jobs are kept (default 86400 self-hosted) |
+| `PRESETS_DIR` | Directory of job presets |
+| `CLIP_FORMAT` | Server-wide clip format: `default` or `gaming_stack` |
+| `GAMING_CAMERA_RATIO`, `GAMING_FACECAM_BOX` | Gaming stack camera height and fixed webcam box |
+| `CLIP_DEAD_TRIM`, `CLIP_DEAD_TRIM_MAX_SECONDS` | Dead-footage trimming switch and per-edge cap |
+| `WHISPER_MODEL`, `WHISPER_DEVICE`, `WHISPER_COMPUTE` | Transcription model and device |
+| `TRANSCRIBE_BACKEND` | `whisper` (default) or `parakeet` (GPU image) |
+| `FFMPEG_ENCODER` | `x264` (default), `nvenc` or `auto` |
+| `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | OpenAI-compatible endpoint for the clip pipeline |
+| `LLM_PROVIDER` | Force `openai` or `gemini` |
+| `LLM_VISION_MODEL`, `LLM_VIDEO_MODEL` | Image and silent-footage models |
+| `LLM_INPUT_MODALITIES` | JSON map of model ID to input modalities |
+| `LLM_EXTRA_BODY` | JSON of extra request fields for the compatible endpoint |
+| `LLM_SCORE_BATCH` | Transcript windows per scoring call (default 3 compatible, 8 Gemini) |
+| `LLM_TIMEOUT` | Compatible-endpoint timeout in seconds (default 600) |
+| `VISION_FRAME_INTERVAL` | Seconds between stills for image input (default 2) |
+| `VISION_MAX_FRAMES` | Stills per stretch (default 120) |
+| `VISION_MAX_SECONDS` | Watched-duration budget (default 19200), rounded up to whole stretches |
+| `VISION_SEGMENT_SECONDS` | Stretch size; default 2400 for Gemini video, 600 for compatible video, interval × frames for images |
+| `VISION_MAX_SEGMENTS` | Stretch-count limit; otherwise derived from the budget |
 
+Containers run as a non-root `appuser`, and uploads are capped at 2 GB.
 
-**Client-side (encrypted in localStorage):**
-| Key | Description |
-|-----|------------|
-| `GEMINI_API_KEY` | Google Gemini — optional for clipping with a configured compatible endpoint; still used by separate Gemini features |
-| `FAL_KEY` | fal.ai — required for AI Shorts |
-| `ELEVENLABS_API_KEY` | ElevenLabs — required for voiceover/dubbing |
-| `UPLOAD_POST_API_KEY` | Upload-Post — required, for social posting |
+## Upload-Post setup
 
----
-
-## Security & Performance
-
-- **Non-Root Execution**: Containers run as dedicated `appuser`
-- **Concurrency Control**: Semaphore-based job queue (`MAX_CONCURRENT_JOBS`)
-- **Auto-Cleanup**: Old jobs are purged automatically (24h by default when self-hosted, `JOB_RETENTION_SECONDS`)
-- **Encrypted Keys**: API keys encrypted client-side, never stored server-side
-- **Upload Validation**: Image uploads validated for format and minimum size
-- **File Limits**: 2GB upload limit protection
-
----
-
-## Social Media Setup (Upload-Post)
-
-1. **Register**: [app.upload-post.com/login](https://app.upload-post.com/login)
-2. **Create Profile**: Go to [Manage Users](https://app.upload-post.com/manage-users)
-3. **Connect Accounts**: Link TikTok, Instagram, and/or YouTube
-4. **Get API Key**: Navigate to [API Keys](https://app.upload-post.com/api-keys)
-5. **Use in OpenShorts**: Paste the key in Settings
-
-On [OpenShorts Cloud](https://www.openshorts.app/) none of this is needed: paid plans connect your socials from the app.
-
----
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=mutonby/openshorts&type=Date)](https://star-history.com/#mutonby/openshorts&Date)
-
-## Contributions
-
-Contributions are welcome! Whether it's adding new AI models, improving the lip-sync pipeline, or building new features — feel free to open a PR.
+1. Register at [app.upload-post.com](https://app.upload-post.com/login).
+2. Create a profile under [Manage Users](https://app.upload-post.com/manage-users) and connect your social accounts.
+3. Create a key under [API Keys](https://app.upload-post.com/api-keys) and paste it into Settings.
 
 ## License
 
-MIT License for the core application — OpenShorts is yours to use, modify, and scale.
-
-**Exception:** the [`cloud/`](cloud/LICENSE) directory (billing, managed keys, and the hosted-service infrastructure behind the optional `BILLING_ENABLED` flag) is source-available under the OpenShorts Commercial License. You can read it, modify it, and self-host it for personal or internal use, but you can't offer it to third parties as a paid/hosted service. Self-hosting the core app never requires this directory.
+MIT, except [`cloud/`](cloud/LICENSE) (billing and hosted-service code behind `BILLING_ENABLED`), which is source-available under the OpenShorts Commercial License: you may read, modify and self-host it for personal or internal use, but not offer it to third parties as a paid or hosted service.
+The core app never requires that directory.
