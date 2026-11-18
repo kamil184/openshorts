@@ -254,3 +254,21 @@ class TestGamingStackGeometry:
         fmt = gs.GamingStackFormat()
         got = fmt.analyze("unused.mp4", 1920, 1080, 1080, 1920, 20.0)
         assert got == {"box": (0, 407, 524, 329), "known_bounds": True, "source": "env"}
+
+
+class TestDetectedInsetGameplay:
+    def test_gameplay_stays_centred_when_only_the_widened_cam_crop_overlaps(self, monkeypatch):
+        monkeypatch.delenv("GAMING_CAMERA_RATIO", raising=False)
+        fmt = gs.GamingStackFormat()
+        box = (1440, 756, 422, 291)  # bottom-right webcam, clear of the centre crop
+        plan = fmt.compose({"box": box, "known_bounds": False}, 1920, 1080, 1080, 1920, 10.0)
+        gx, gy, gw, gh = plan.meta["game_crop"]
+        assert (gw, gh) == (868, 1080)
+        assert gx == 526
+
+    def test_gameplay_still_avoids_a_detected_webcam_it_overlaps(self, monkeypatch):
+        monkeypatch.delenv("GAMING_CAMERA_RATIO", raising=False)
+        fmt = gs.GamingStackFormat()
+        box = (800, 700, 320, 240)  # bottom-centre webcam inside the centre crop
+        plan = fmt.compose({"box": box, "known_bounds": False}, 1920, 1080, 1080, 1920, 10.0)
+        assert not gs._overlaps(plan.meta["game_crop"], box)

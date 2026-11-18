@@ -201,12 +201,11 @@ def build_filtergraph(out_w: int, out_h: int,
     )
 
 
-def _union_box(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
-    x0 = min(a[0], b[0])
-    y0 = min(a[1], b[1])
-    x1 = max(a[0] + a[2], b[0] + b[2])
-    y1 = max(a[1] + a[3], b[1] + b[3])
-    return (x0, y0, x1 - x0, y1 - y0)
+def _with_headroom(box: tuple[int, int, int, int], orig_w: int, orig_h: int) -> tuple[int, int, int, int]:
+    """``box`` grown upward by ``CAMERA_HEADROOM``, as ``camera_crop_box`` does."""
+    bx, by, bw, bh = (int(v) for v in box)
+    new_y = max(0, by - int(round(bh * CAMERA_HEADROOM)))
+    return (bx, new_y, min(bw, orig_w - bx), min(bh + (by - new_y), orig_h - new_y))
 
 
 class GamingStackFormat(ClipFormat):
@@ -245,7 +244,10 @@ class GamingStackFormat(ClipFormat):
 
         cam_h, game_h = band_heights(out_h)
         cam_crop = camera_crop_box(box, orig_w, orig_h, out_w, cam_h, known_bounds=known_bounds)
-        exclude = box if known_bounds else _union_box(box, cam_crop)
+        # Keep gameplay off the webcam itself (plus the headroom above a
+        # detected box), not off the cam crop: that crop is widened to the
+        # band's aspect, and avoiding the widening shoves gameplay off-centre.
+        exclude = box if known_bounds else _with_headroom(box, orig_w, orig_h)
         game_crop = gameplay_crop_box(orig_w, orig_h, out_w, game_h, exclude_box=exclude)
         graph = build_filtergraph(out_w, out_h, cam_crop, game_crop, cam_h, game_h)
         seam = round(cam_h / float(out_h), 4)
