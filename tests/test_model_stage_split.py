@@ -1,16 +1,16 @@
 """A policy block on a batch of windows must bisect, not kill the job."""
 import pytest
 main = pytest.importorskip("main")
-import prompts
+import llm_backend
 
 
 def _windows(n):
     return [{"id": f"w{i}", "start": i * 10, "end": i * 10 + 10, "text": f"t{i}"} for i in range(n)]
 
 
-def test_block_on_pair_isolates_and_drops_only_the_culprit(monkeypatch):
+def test_blocked_pair_survives_after_bisection(monkeypatch):
     calls = []
-    def fake_stage(client, model, prompt, schema):
+    def fake_stage(model, prompt, schema):
         ids = [w["id"] for w in __import__("json").loads(prompt)]
         calls.append(ids)
         if "w5" in ids and "w6" in ids:      # the pair that trips the filter
@@ -18,9 +18,9 @@ def test_block_on_pair_isolates_and_drops_only_the_culprit(monkeypatch):
         if ids == ["w3"]:                    # and w3 blocks even on its own
             raise llm_backend.BlockedError("PROHIBITED_CONTENT")
         return {"windows": [{"id": i, "score": 50} for i in ids]}, {"input_tokens": 1}
-    monkeypatch.setattr(main, "_run_gemini_stage", fake_stage)
+    monkeypatch.setattr(main, "_run_model_stage", fake_stage)
     costs = []
-    out = main._run_stage_split(None, "m", _windows(8), lambda ws: __import__("json").dumps(ws),
+    out = main._run_stage_split("m", _windows(8), lambda ws: __import__("json").dumps(ws),
                                 None, "windows", costs, "score")
     got = sorted(w["id"] for w in out)
     # w5 and w6 each survive once separated; w3 only ever reached the model on
@@ -35,9 +35,28 @@ def test_block_on_pair_isolates_and_drops_only_the_culprit(monkeypatch):
 
 def test_no_block_is_a_single_call(monkeypatch):
     calls = []
-    def fake_stage(client, model, prompt, schema):
+    def fake_stage(model, prompt, schema):
         calls.append(prompt)
         return {"shorts": [{"start": 0, "end": 20}]}, None
-    monkeypatch.setattr(main, "_run_gemini_stage", fake_stage)
-    out = main._run_stage_split(None, "m", _windows(3), lambda ws: "p", None, "shorts", [], "detail")
+    monkeypatch.setattr(main, "_run_model_stage", fake_stage)
+    out = main._run_stage_split("m", _windows(3), lambda ws: "p", None, "shorts", [], "detail")
     assert out == [{"start": 0, "end": 20}] and len(calls) == 1
+
+
+
+def test_single_blocked_window_is_dropped_and_other_costs_are_kept(monkeypatch):
+    calls = []
+    def fake_stage(model, prompt, schema):
+        ids = prompt.split(",")
+        calls.append(ids)
+        if "w1" in ids:
+            raise llm_backend.BlockedError("blocked")
+        return {"windows": [{"id": i} for i in ids]}, {"input_tokens": len(ids)}
+    monkeypatch.setattr(main, "_run_model_stage", fake_stage)
+    costs = []
+    out = main._run_stage_split("m", _windows(3),
+                                lambda ws: ",".join(w["id"] for w in ws),
+                                None, "windows", costs, "score")
+    assert out == [{"id": "w0"}, {"id": "w2"}]
+    assert ["w1"] in calls
+    assert costs == [{"input_tokens": 1}, {"input_tokens": 1}]

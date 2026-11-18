@@ -64,6 +64,8 @@ def provider():
     """The configured provider module, or None when no model is configured."""
     explicit = (os.environ.get("LLM_PROVIDER") or "").strip().lower()
     explicit = _ALIASES.get(explicit, explicit)
+    if explicit and explicit not in _PROVIDERS:
+        raise ValueError(f"unknown LLM_PROVIDER: {explicit!r}")
     if explicit in _PROVIDERS:
         chosen = _PROVIDERS[explicit]
         return chosen if chosen.configured() else None
@@ -151,7 +153,8 @@ def generate_json(prompt: str, schema: Type[BaseModel], *, task: str = TEXT,
     bodies and schema violations; retry policy belongs to the caller.
 
     ``gemini_key`` is a caller's own Gemini key (the hosted edition's per-request
-    keys); it is used only when the server configures no model of its own.
+    keys); it overrides the server key when the Gemini provider is selected,
+    or supplies Gemini when no server provider is configured.
     """
     chosen = provider()
     if chosen is None and gemini_key:

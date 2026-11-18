@@ -4,7 +4,7 @@ The SDK, handed a path, puts ``os.path.basename(path)`` into the
 ``X-Goog-Upload-File-Name`` header, and httpx encodes header values as ASCII.
 The downloaded source is named after the video's title, so on 20-sep-2026 a
 job died with ``'ascii' codec can't encode characters in position 0-4`` before
-a byte was sent, and the pipeline reported it as "the AI model did not return
+a byte was sent, and the pipeline reported it as "the model did not return
 usable clips for this video".
 """
 import io
@@ -12,7 +12,8 @@ import io
 import httpx
 import pytest
 
-import prompts
+import llm_gemini
+import llm_backend
 
 
 def _prepared_headers(file_arg, mime_type=None):
@@ -72,7 +73,7 @@ def test_an_unknown_extension_still_gets_a_mime_type(tmp_path):
 
 
 def test_every_whole_file_upload_goes_through_the_helper():
-    """The three stages that send Gemini the file itself, not frames."""
+    """Whole-file uploads stay inside the provider upload helper."""
     import pathlib
     import re
     root = pathlib.Path(__file__).resolve().parent.parent
@@ -82,3 +83,46 @@ def test_every_whole_file_upload_goes_through_the_helper():
         if re.search(r"\.files\.upload\(", src):
             offenders.append(name)
     assert offenders == [], f"{offenders} call files.upload directly (use upload_media)"
+
+
+@pytest.mark.parametrize("reason", ["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST",
+                                    "SPII", "IMAGE_SAFETY", "RECITATION"])
+def test_blocked_finish_reason_raises(reason):
+    from types import SimpleNamespace as NS
+    response = NS(prompt_feedback=None, candidates=[NS(finish_reason=NS(name=reason))])
+    with pytest.raises(llm_backend.BlockedError, match=reason):
+        llm_gemini.raise_if_blocked(response)
+
+
+def test_prompt_feedback_blocks_an_empty_response():
+    from types import SimpleNamespace as NS
+    response = NS(text="", candidates=[],
+                  prompt_feedback=NS(block_reason=NS(name="PROHIBITED_CONTENT")))
+    with pytest.raises(llm_backend.BlockedError, match="PROHIBITED_CONTENT"):
+        llm_gemini.raise_if_blocked(response)
+
+
+def test_clean_response_is_not_flagged():
+    from types import SimpleNamespace as NS
+    llm_gemini.raise_if_blocked(NS(prompt_feedback=None, candidates=[]))
+
+
+def test_empty_response_is_parsed_inside_the_facade(monkeypatch):
+    from types import SimpleNamespace as NS
+    from google import genai
+    import prompts
+
+    monkeypatch.setenv("LLM_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    seen = []
+    responses = iter([NS(parsed=None, text="", candidates=[], prompt_feedback=None),
+                      NS(parsed={"windows": []}, usage_metadata=None,
+                         candidates=[], prompt_feedback=None)])
+    def generate(**kw):
+        seen.append(kw)
+        return next(responses)
+    monkeypatch.setattr(genai, "Client", lambda **kw: NS(models=NS(generate_content=generate)))
+    with pytest.raises(ValueError, match="empty response body"):
+        llm_backend.generate_json("p", prompts.ScoreResponse)
+    assert llm_backend.generate_json("p", prompts.ScoreResponse) == ({"windows": []}, None)
+    assert len(seen) == 2

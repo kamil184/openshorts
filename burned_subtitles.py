@@ -100,11 +100,11 @@ def detect(video_path, frames=None):
     """
     if not ENABLED:
         return None
-    import llm_backend
-    model_name = llm_backend.image_model()
-    if not model_name:
-        return None
     try:
+        import llm_backend
+        model_name = llm_backend.image_model()
+        if not model_name:
+            return None
         from pydantic import BaseModel
 
         import layout_picker

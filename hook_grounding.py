@@ -134,13 +134,13 @@ def reground(clip_path, clip, transcript, start, end) -> Optional[dict]:
     """Rewrite ``clip['viral_hook_text']`` / ``video_title_for_youtube_short``
     in place from the clip's frames. Returns what changed (also stored under
     ``clip['hook_grounding']``), or None when skipped or failed."""
-    import llm_backend
-    model_name = llm_backend.image_model()
-    if not model_name:
-        print("   🪝 Hook grounding skipped: no configured model takes images, "
-              "keeping the transcript hook.")
-        return None
     try:
+        import llm_backend
+        model_name = llm_backend.image_model()
+        if not model_name:
+            print("   🪝 Hook grounding skipped: no configured model takes images, "
+                  "keeping the transcript hook.")
+            return None
         import prompts
 
         times = sample_times(clip.get("layout_ranges"), float(end) - float(start))

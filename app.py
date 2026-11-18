@@ -3799,7 +3799,7 @@ async def _notify_clip_activity(job_id):
 
 # Markers that identify a line as an actual error rather than progress noise.
 # "Error:" (capital E) catches raised exception lines — RuntimeError:,
-# DownloadError:, GeminiBlockedError: — which "ERROR:" alone missed, leaving
+# DownloadError:, BlockedError: — which "ERROR:" alone missed, leaving
 # alerts with a bare "Traceback ... exit code 1" and no cause (prod 20-ago).
 _ERROR_MARKERS = ("❌", "ERROR:", "Error:", "Traceback", "FATAL", "Exception",
                   "Process failed with exit code", "No metadata file generated",

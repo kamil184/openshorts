@@ -158,9 +158,9 @@ class TestClipCountTargets:
 
 class TestDetailPromptCarriesTheCount:
     def test_template_formats_with_the_targets(self):
-        gw = pytest.importorskip("gemini_worker")
+        prompts = pytest.importorskip("prompts")
         low, high = clip_count_targets(5)
-        prompt = gw.DETAIL_PROMPT_TEMPLATE.format(
+        prompt = prompts.DETAIL_PROMPT_TEMPLATE.format(
             video_duration=300, language="es", min_clips=low, max_clips=high,
             min_secs=15.0, max_secs=60.0, windows_json="[]")
         assert f"return {low} to {high} clips" in prompt

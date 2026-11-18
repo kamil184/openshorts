@@ -404,3 +404,76 @@ def test_silent_footage_input_follows_what_the_model_takes(local, monkeypatch, m
         assert segment == llm_openai.VIDEO_SEGMENT_SECONDS
     # The same total span is watched whatever the stretch size.
     assert segment * max_segments >= main.VISION_MAX_SECONDS
+
+
+@pytest.mark.parametrize("declaration", ['{"m": "image"}', '{"m": [1]}'])
+def test_invalid_modality_declarations_fail_loudly(local, monkeypatch, declaration):
+    monkeypatch.setenv("LLM_INPUT_MODALITIES", declaration)
+    with pytest.raises(ValueError, match="list of strings"):
+        llm_backend.input_modalities("m")
+
+
+def test_unknown_provider_is_not_silently_ignored(local, monkeypatch):
+    monkeypatch.setenv("LLM_PROVIDER", "typo")
+    with pytest.raises(ValueError, match="unknown LLM_PROVIDER"):
+        llm_backend.available()
+
+
+@pytest.mark.parametrize("choice", [
+    {"finish_reason": "content_filter", "message": {"content": ""}},
+    {"finish_reason": "stop", "message": {"refusal": "Declined", "content": None}},
+])
+def test_provider_refusal_is_a_policy_block(local, monkeypatch, choice):
+    _serve(lambda r: httpx.Response(200, json={"choices": [choice]}), monkeypatch)
+    with pytest.raises(llm_backend.BlockedError):
+        llm_backend.generate_json("p", prompts.ScoreResponse)
+
+
+def test_frame_stage_setup_errors_preserve_fallbacks(monkeypatch):
+    import burned_subtitles
+    import hook_grounding
+    import layout_picker
+    import screencast_layout
+
+    def broken_setup():
+        raise ValueError("invalid capability configuration")
+    monkeypatch.setattr(llm_backend, "image_model", broken_setup)
+    monkeypatch.setattr(burned_subtitles, "ENABLED", True)
+    monkeypatch.setattr(layout_picker, "ENABLED", True)
+    monkeypatch.setattr(screencast_layout, "ENABLED", True)
+    clip = {"viral_hook_text": "original"}
+    assert layout_picker.pick("video.mp4", 60) == "none"
+    assert burned_subtitles.detect("video.mp4") is None
+    assert hook_grounding.reground("clip.mp4", clip, {}, 0, 30) is None
+    assert clip == {"viral_hook_text": "original"}
+    assert screencast_layout.detect_content_ranges("clip.mp4", [(0, 30)], 30) is None
+
+
+def test_short_frame_stretches_respect_the_frame_limit(local, monkeypatch):
+    from types import SimpleNamespace
+    main = pytest.importorskip("main")
+    monkeypatch.setattr(main, "VISION_MAX_FRAMES", 1)
+    monkeypatch.setattr(main, "VISION_FRAME_INTERVAL", 2)
+    seen = []
+    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k:
+                        SimpleNamespace(returncode=0, stdout=b"jpg"))
+    def generate(prompt, schema, **kw):
+        seen.append((prompt, kw))
+        return {"shorts": []}, None
+    monkeypatch.setattr(llm_backend, "generate_json", generate)
+    main._visual_pass("m", "frames", "proxy.mp4", 60, "en", 1, 3, 15, 60)
+    prompt, call = seen[0]
+    assert call["media"] == ["t=0", b"jpg"]
+    assert "every\n60 seconds" in prompt
+
+
+
+def test_frame_plan_budgets_the_shared_minimum_stretch(local, monkeypatch):
+    main = pytest.importorskip("main")
+    monkeypatch.setattr(main, "VISION_MAX_FRAMES", 1)
+    monkeypatch.setattr(main, "VISION_FRAME_INTERVAL", 2)
+    monkeypatch.setattr(main, "VISION_MAX_SECONDS", 19200)
+    monkeypatch.delenv("VISION_SEGMENT_SECONDS", raising=False)
+    monkeypatch.delenv("VISION_MAX_SEGMENTS", raising=False)
+    monkeypatch.setattr(llm_backend, "supports", lambda model, modality: modality == "image")
+    assert main.vision_plan("m") == ("frames", 60, 320)

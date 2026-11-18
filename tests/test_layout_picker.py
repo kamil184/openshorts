@@ -1,4 +1,5 @@
 import sys
+import llm_backend
 import types
 
 import layout_picker
@@ -82,20 +83,23 @@ class TestApply:
 class TestPick:
     def test_disabled_picker_never_calls_out(self, monkeypatch):
         monkeypatch.setattr(layout_picker, "ENABLED", False)
-        monkeypatch.setenv("GEMINI_API_KEY", "x")
+        monkeypatch.setattr(llm_backend, "image_model", lambda: "test-vision")
         assert pick("video.mp4", 60) == "none"
 
-    def test_missing_api_key_degrades_to_none(self, monkeypatch):
+    def test_no_capable_model_degrades_to_none(self, monkeypatch):
         monkeypatch.setattr(layout_picker, "ENABLED", True)
-        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.setattr(llm_backend, "image_model", lambda: None)
         assert pick("video.mp4", 60) == "none"
 
     def test_a_failed_call_degrades_to_none(self, monkeypatch):
-        # Import failure inside pick() stands in for any API error; the job
+        # A provider failure must preserve the fallback; the job
         # must keep rendering with today's routing rather than die.
         monkeypatch.setattr(layout_picker, "ENABLED", True)
-        monkeypatch.setenv("GEMINI_API_KEY", "x")
-        monkeypatch.setitem(sys.modules, "google.genai", None)
+        monkeypatch.setattr(llm_backend, "image_model", lambda: "test-vision")
+        monkeypatch.setattr(layout_picker, "sample_frames", lambda *a: [b"jpg"])
+        def fail(*a, **kw):
+            raise RuntimeError("provider unavailable")
+        monkeypatch.setattr(llm_backend, "generate_json", fail)
         assert pick("video.mp4", 60) == "none"
 
 
@@ -119,7 +123,7 @@ class TestSampleFrames:
 
     def test_no_frames_degrades_to_none(self, monkeypatch):
         monkeypatch.setattr(layout_picker, "ENABLED", True)
-        monkeypatch.setenv("GEMINI_API_KEY", "x")
+        monkeypatch.setattr(llm_backend, "image_model", lambda: "test-vision")
         monkeypatch.setattr(layout_picker, "sample_frames", lambda *a, **k: [])
         assert pick("video.mp4", 60) == "none"
 

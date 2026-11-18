@@ -102,7 +102,10 @@ def _declared_modalities() -> dict:
     declared = json.loads(raw)
     if not isinstance(declared, dict):
         raise ValueError("LLM_INPUT_MODALITIES must be a JSON object")
-    return {str(k): frozenset(map(str, v)) for k, v in declared.items()}
+    for model, modalities in declared.items():
+        if not isinstance(modalities, list) or not all(isinstance(m, str) for m in modalities):
+            raise ValueError(f"LLM_INPUT_MODALITIES[{model!r}] must be a list of strings")
+    return {str(k): frozenset(v) for k, v in declared.items()}
 
 
 def _listed_modalities() -> dict:
@@ -221,7 +224,11 @@ def generate_json(prompt: str, schema: Type[BaseModel], model: str,
     choices = data.get("choices") or []
     text = ""
     if choices:
+        from llm_backend import BlockedError
+
         msg = choices[0].get("message") or {}
+        if choices[0].get("finish_reason") == "content_filter" or msg.get("refusal"):
+            raise BlockedError("The model provider refused the request for content-policy reasons.")
         text = msg.get("content") or ""
         if isinstance(text, list):  # some servers return content parts
             text = "".join(p.get("text", "") for p in text if isinstance(p, dict))

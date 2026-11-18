@@ -50,45 +50,6 @@ load_dotenv()
 # --- Constants ---
 ASPECT_RATIO = 9 / 16
 
-GEMINI_PROMPT_TEMPLATE = """
-You are a senior short-form video editor. Read the ENTIRE transcript and word-level timestamps to choose the 3–15 MOST VIRAL moments for TikTok/IG Reels/YouTube Shorts. Each clip must be between 15 and 60 seconds long.
-
-⚠️ FFMPEG TIME CONTRACT — STRICT REQUIREMENTS:
-- Return timestamps in ABSOLUTE SECONDS from the start of the video (usable in: ffmpeg -ss <start> -to <end> -i <input> ...).
-- Only NUMBERS with decimal point, up to 3 decimals (examples: 0, 1.250, 17.350).
-- Ensure 0 ≤ start < end ≤ VIDEO_DURATION_SECONDS.
-- Each clip between 15 and 60 s (inclusive).
-- Prefer starting 0.2–0.4 s BEFORE the hook and ending 0.2–0.4 s AFTER the payoff.
-- Use silence moments for natural cuts; never cut in the middle of a word or phrase.
-- STRICTLY FORBIDDEN to use time formats other than absolute seconds.
-
-VIDEO_DURATION_SECONDS: {video_duration}
-
-TRANSCRIPT_TEXT (raw):
-{transcript_text}
-
-WORDS_JSON (array of {{w, s, e}} where s/e are seconds):
-{words_json}
-
-STRICT EXCLUSIONS:
-- No generic intros/outros or purely sponsorship segments unless they contain the hook.
-- No clips < 15 s or > 60 s.
-
-OUTPUT — RETURN ONLY VALID JSON (no markdown, no comments). Order clips by predicted performance (best to worst). In the descriptions, ALWAYS include a CTA like "Follow me and comment X and I'll send you the workflow" (especially if discussing an n8n workflow):
-{{
-  "shorts": [
-    {{
-      "start": <number in seconds, e.g., 12.340>,
-      "end": <number in seconds, e.g., 37.900>,
-      "video_description_for_tiktok": "<description for TikTok oriented to get views>",
-      "video_description_for_instagram": "<description for Instagram oriented to get views>",
-      "video_title_for_youtube_short": "<title for YouTube Short oriented to get views 100 chars max>",
-      "viral_hook_text": "<SHORT punchy text overlay (max 10 words) with 1-2 fitting emojis. MUST BE IN THE SAME LANGUAGE AS THE VIDEO TRANSCRIPT. Examples: 'POV: You realized... 😳', 'Did you know? 🤯', 'Stop doing this! 🚫'>"
-    }}
-  ]
-}}
-"""
-
 # Load the YOLO model once (Keep for backup or scene analysis if needed)
 # YOLO_MODEL_PATH lets deployments point at a pre-downloaded weights file so a
 # volume mounted over the workdir doesn't trigger a re-download at startup.
@@ -1465,7 +1426,7 @@ def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=
 
 
 def auto_hook_clip(clip_path, clip, captions=None, mark=False):
-    """Burn the clip's Gemini hook text as a DERIVED file (AUTO_HOOK=1).
+    """Burn the clip's hook text as a DERIVED file (AUTO_HOOK=1).
 
     Writes ``hooked_<ts>_<clip filename>`` next to the canonical clip, exactly
     like captions write ``subtitled_<ts>_...``: the canonical stays clean, so
@@ -2244,7 +2205,7 @@ def get_viral_clips(transcript_result, video_duration, viewer_clips=None):
               "server, or GEMINI_API_KEY).")
         return None
     model_name = llm_backend.model_for(llm_backend.TEXT)
-    print(f"\U0001f916  Analyzing with {llm_backend.provider_name()} (2-pass: score → detail)...")
+    print("\U0001f916  Analyzing transcript (2-pass: score → detail)...")
     print(f"\U0001f916  Model: {model_name} | language: {language}")
 
     # Full word list — ground truth for snapping cut points.
@@ -2460,10 +2421,16 @@ def vision_plan(model_name):
         return None
     raw = os.environ.get("VISION_SEGMENT_SECONDS", "").strip()
     segment = float(raw) if raw else default
+    if not math.isfinite(segment) or segment <= 0:
+        raise ValueError("VISION_SEGMENT_SECONDS must be positive and finite")
     if mode == "frames":
         segment = min(segment, VISION_FRAME_INTERVAL * VISION_MAX_FRAMES)
+    # Match vision_segments' minimum so the coverage budget uses the actual span.
+    segment = max(60.0, segment)
     raw = os.environ.get("VISION_MAX_SEGMENTS", "").strip()
     max_segments = int(raw) if raw else max(1, math.ceil(VISION_MAX_SECONDS / segment))
+    if max_segments < 1:
+        raise ValueError("VISION_MAX_SEGMENTS must be positive")
     return mode, segment, max_segments
 
 
@@ -2471,11 +2438,9 @@ def _vision_proxy(video_path, start, end, out_path):
     """A small re-encode of [start, end] for the vision pass.
 
     Re-encoded, not stream-copied: a copy snaps the start to the previous
-    keyframe, and every timestamp Gemini returns would then be off by up to a
-    GOP. 360p at 1 fps is what Gemini samples anyway (one frame per second),
-    so the proxy costs the model nothing in detail and keeps the upload far
-    under the Files API size limit; the mono audio stays because a silent
-    gameplay capture still has its explosions and music.
+    keyframe, and every timestamp the model returns would then be off by up to a
+    GOP. 360p at 1 fps keeps transfer sizes small; mono audio stays because
+    a capture without speech can still have explosions and music.
 
     A source whose audio cannot be decoded (a broken HLS capture: the same
     file the ASR could not read, which is why it came here) is retried
@@ -2527,7 +2492,9 @@ def _proxy_frames(proxy_path, duration, interval):
     """Timestamped JPEG stills of a vision proxy: ["t=0", jpg, "t=2", jpg, ...]."""
     media = []
     t = 0.0
-    while t < duration:
+    for _ in range(VISION_MAX_FRAMES):
+        if t >= duration:
+            break
         res = subprocess.run(
             ["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", proxy_path,
              "-frames:v", "1", "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
@@ -2548,10 +2515,11 @@ def _visual_pass(model_name, mode, video_path, duration, language,
         min_clips=min_clips, max_clips=max_clips,
         min_secs=min_secs, max_secs=max_secs) + (hint or "")
     if mode == "frames":
-        media = _proxy_frames(video_path, duration, VISION_FRAME_INTERVAL)
+        interval = max(VISION_FRAME_INTERVAL, duration / VISION_MAX_FRAMES)
+        media = _proxy_frames(video_path, duration, interval)
         if not media:
             raise RuntimeError("no readable frames in the vision proxy")
-        prompt = FRAMES_PREAMBLE.format(interval=VISION_FRAME_INTERVAL) + prompt
+        prompt = FRAMES_PREAMBLE.format(interval=interval) + prompt
     else:
         media = [llm_backend.Video(video_path)]
     parsed, cost = llm_backend.generate_json(
@@ -2566,14 +2534,15 @@ def _visual_pass(model_name, mode, video_path, duration, language,
 
 
 def get_visual_clips(video_path, video_duration, language="en", viewer_clips=None):
-    """Clip a SILENT video by vision: Gemini watches the footage and picks the
-    most engaging visual moments (no transcript). Returns the same
+    """Pick engaging moments from silent footage with the configured model.
+
+    Uses no transcript. Returns the same
     {"shorts", "cost_analysis"} shape as get_viral_clips, or None.
 
-    Gemini always watches a 360p/1 fps proxy (``_vision_proxy``), never the
-    source file: a broken capture (unreadable audio, MPEG-TS in MP4) made the
+    The model receives a 360p/1 fps proxy (``_vision_proxy``) or timestamped
+    frames, never the source file: a broken capture (unreadable audio, MPEG-TS in MP4) made the
     model answer 400 INVALID_ARGUMENT, and a raw upload runs to hundreds of
-    MB. A source longer than VISION_SEGMENT_SECONDS is watched stretch by
+    MB. A source longer than the configured stretch size is watched stretch by
     stretch (``vision_segments``), and the picks are merged, de-overlapped
     and cut to the best ``CLIP_TARGET_MAX`` by score: a silent multi-hour
     console capture used to fail at the model."""
@@ -2769,7 +2738,7 @@ if __name__ == '__main__':
             else:
                 output_dir = "."
         
-        # Transcription (and the Gemini pick) start on the audio track while the
+        # Transcription (and the moment selection) start on the audio track while the
         # video is still downloading; see download_youtube_video(on_audio=).
         # Not for a MAX_SOURCE_MINUTES job (the video is always cut, so the
         # early words would cover too much), nor when a checkpoint or a
@@ -2876,7 +2845,7 @@ if __name__ == '__main__':
             from reframe_v2 import source_already_fits  # imports main back
             # A source already shot vertical has no width to reorganise, and
             # the render passes it through whatever the model says. Asking
-            # anyway costs a Gemini call per upload to be ignored.
+            # anyway costs a model call per upload to be ignored.
             if _w and _h and source_already_fits(_w, _h, ASPECT_RATIO):
                 print(f"   ↕️  Source is {_w}x{_h} — already vertical, no layout to pick.")
             else:
@@ -2922,7 +2891,7 @@ if __name__ == '__main__':
         cap.release()
 
         # 3. Transcribe — unless the video has no audio, in which case fall back
-        # to Gemini vision (picks clips from the imagery instead of the speech).
+        # to the vision pass (picks clips from the imagery instead of the speech).
         from transcribe_backends import NoAudioError
         transcript = None
         # Module handover (issue #68): another module already transcribed this
@@ -2983,11 +2952,11 @@ if __name__ == '__main__':
                   f"switching to visual analysis.")
             transcript = None
 
-        # 4. Gemini Analysis (transcript-driven, or vision for silent videos)
+        # 4. Model analysis (transcript-driven, or vision for silent videos)
         early_clips = (early_state or {}).get("clips") if early_state else None
         if (transcript is not None and early_clips
                 and transcript is early_state["transcript"]):
-            print("♻️ Using the clips Gemini picked while the video downloaded.")
+            print("♻️ Using the clips picked while the video downloaded.")
             clips_data = early_clips
         elif transcript is not None:
             clips_data = get_viral_clips(transcript, duration, viewer_clips=viewer_clips)
@@ -3024,7 +2993,7 @@ if __name__ == '__main__':
             def _process_one_clip(i, clip):
                 if clip.get('pro_before'):
                     # A retry of a clip whose first attempt got as far as pro
-                    # mode: start again from the range Gemini picked.
+                    # mode: start again from the range the model picked.
                     import pro_mode
                     clip.update(pro_mode.restore(clip))
                 start = clip['start']

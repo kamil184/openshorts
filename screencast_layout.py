@@ -358,7 +358,7 @@ def detect_content_ranges(video_path, scenes, fps):
 
     Returns a list of (start_s, end_s, kind, width_fraction, focus, cam), [] when no
     shot shows one or the module is off, or None when the question could not be
-    asked or answered (no key, no frames, an API error). Callers must treat None
+    asked or answered (no capable model, no frames, a provider error). Callers must treat None
     differently from []: the user asked for this layout, so a failed check must
     not quietly hand the clip back to the face classifier (see fallback_ranges).
     """
@@ -366,15 +366,14 @@ def detect_content_ranges(video_path, scenes, fps):
         return []
     if not scenes:
         return None
-    import llm_backend
-    model_name = llm_backend.image_model()
-    if not model_name:
-        print("   ⚠️ Screen check needs a configured model that takes images.")
-        return None
-
-    asked = shots_to_ask(scenes)
-    print(f"   🔎 Screen check on {len(asked)} shot(s)…")
     try:
+        import llm_backend
+        model_name = llm_backend.image_model()
+        if not model_name:
+            print("   ⚠️ Screen check needs a configured model that takes images.")
+            return None
+        asked = shots_to_ask(scenes)
+        print(f"   🔎 Screen check on {len(asked)} shot(s)…")
         import prompts
 
         frames = _shot_frames(video_path, scenes, asked)

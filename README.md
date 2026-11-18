@@ -200,7 +200,7 @@ Self-hosting OpenShorts is free. You provide the machine and you only pay for th
 ## Requirements
 
 - **Docker & Docker Compose**
-- **Google Gemini API Key** ([Free — get it here](https://aistudio.google.com/app/apikey)) — required for all AI features
+- **Google Gemini API Key** ([Free — get it here](https://aistudio.google.com/app/apikey)) — default clip provider; optional for clipping with a configured compatible endpoint, still required by separate Gemini features
 - **fal.ai API Key** ([Pay-per-use](https://fal.ai)) — required for AI Shorts (actor generation, video, lip-sync)
 - **ElevenLabs API Key** ([Free tier](https://elevenlabs.io)) — required for voiceover/dubbing
 - **Upload-Post API Key** ([free tier](https://upload-post.com)) — required for direct social posting
@@ -286,32 +286,36 @@ The backend log on the first job reports the chosen encoder and transcription de
 
 ### 6. Run without a Google key (local LLM, optional)
 
-The only cloud call in the clip pipeline is the moment picker: it sends the
-transcript (never the video) to Gemini. Point it at any OpenAI-compatible
-server instead and the whole pipeline stays on your box:
+The clip pipeline routes transcript scoring, titles and visual checks through one model interface.
+Point `LLM_BASE_URL` at an OpenAI-compatible endpoint and the dashboard no longer requires a Google key for clipping.
+Use a local endpoint to keep those model calls on your own hardware.
 
 ```bash
-# .env
-LLM_BASE_URL=http://host.docker.internal:11434/v1   # Ollama on the host
-LLM_MODEL=qwen2.5:14b                                # any chat model that follows instructions
-# LLM_API_KEY=...                                    # only if your server checks one (vLLM --api-key, OpenRouter)
+# .env: set LLM_BASE_URL to your endpoint's /v1 URL
+LLM_MODEL=qwen2.5:14b
+# LLM_API_KEY=...              # only if your endpoint requires a bearer token
+# LLM_VISION_MODEL=vision-model
+# LLM_VIDEO_MODEL=video-model
+# LLM_INPUT_MODALITIES={"vision-model":["text","image"]}
 ```
 
 Works with Ollama, LM Studio, vLLM, llama.cpp server, LocalAI and OpenRouter.
-The dashboard stops asking for a Gemini key when this is set. Two things to
-know:
+`LLM_MODEL` handles text; `LLM_VISION_MODEL` defaults to it, and `LLM_VIDEO_MODEL` defaults to the vision model.
+Capabilities come from the endpoint's `/models` response (`architecture.input_modalities`), with explicit overrides in `LLM_INPUT_MODALITIES` for endpoints that do not publish them.
+Unknown capabilities mean text-only.
 
-- **Context length.** A scoring call carries three transcript windows
-  (~2-3k tokens) and the detail call up to ten (~5k on a long podcast).
-  Ollama defaults to a 4096-token context and truncates silently, so run it
-  with `OLLAMA_CONTEXT_LENGTH=16384` (or set `num_ctx` in a Modelfile); raise
-  `LLM_SCORE_BATCH` above 3 only if your context allows it. 7-8B models
-  return valid JSON reliably, 3B ones do not.
-- **What still needs Gemini.** Anything that has to look at frames: the
-  automatic layout picker (`AUTO_LAYOUT`), the on-screen content detector
-  and silent videos (no speech to clip by). Without a Gemini key those fall
-  back to the plain face-tracking crop, and a silent video fails with a
-  message that says so. Add a key alongside `LLM_BASE_URL` and you get both.
+- **Context length.** Scoring defaults to three transcript windows per call for compatible endpoints, versus eight for Gemini.
+  The detail pass can carry more windows, so size the context for it too.
+  With Ollama, set `OLLAMA_CONTEXT_LENGTH=16384` or `num_ctx` in a Modelfile to avoid silent truncation.
+  `LLM_SCORE_BATCH` overrides the scoring batch size.
+- **Visual tasks.** Layout picking, screen detection, subtitle-band detection and hook grounding require an image-capable vision model and skip or fall back when unavailable.
+  Silent footage uses video input if supported, otherwise timestamped frames; a text-only video-task model cannot clip it.
+  `VISION_*` settings below control sampling and coverage.
+- **Provider selection.** `LLM_BASE_URL` takes precedence over `GEMINI_API_KEY`; adding a Gemini key does not send visual stages to a second provider.
+  `LLM_PROVIDER=openai` or `gemini` explicitly selects the provider.
+  With only a Gemini key, the default model remains `GEMINI_MODEL` or `gemini-3.1-flash-lite`.
+  `LLM_EXTRA_BODY` supplies optional JSON request fields for compatible endpoints, such as reasoning effort or gateway routing.
+  The separate editor, thumbnail and standalone generation features still require their existing provider keys.
 
 ## Technical Pipeline
 
@@ -448,15 +452,27 @@ lives in [`examples/n8n/`](examples/n8n/).
 | `AWS_S3_BUCKET` | Private bucket for clip backup |
 | `AWS_S3_PUBLIC_BUCKET` | Public bucket for gallery/avatars |
 | `MAX_CONCURRENT_JOBS` | Concurrent processing limit (default: 5) |
-| `LLM_BASE_URL` | OpenAI-compatible server for the moment picker (Ollama, vLLM, LM Studio...). Set it and the Gemini key becomes optional |
-| `LLM_MODEL` | Model name on that server (default `llama3.1:8b`) |
+| `LLM_BASE_URL` | OpenAI-compatible endpoint for clip-pipeline model calls; makes the Gemini key optional for clipping |
+| `LLM_MODEL` | Text-task model (compatible default `llama3.1:8b`; Gemini default from `GEMINI_MODEL`) |
 | `LLM_API_KEY` | Bearer token for that server, if it checks one |
 | `LLM_SCORE_BATCH` | Transcript windows per scoring call (default 3 local, 8 Gemini) |
+| `LLM_PROVIDER` | Explicit provider: `openai` or `gemini`; otherwise compatible endpoint first, then Gemini |
+| `LLM_VISION_MODEL` | Image-task model; defaults to `LLM_MODEL` |
+| `LLM_VIDEO_MODEL` | Silent-footage model; defaults to `LLM_VISION_MODEL` |
+| `LLM_INPUT_MODALITIES` | JSON mapping of model IDs to input modality lists; overrides `/models` capabilities |
+| `LLM_EXTRA_BODY` | JSON object of extra compatible-endpoint request fields |
+| `LLM_TIMEOUT` | Compatible-endpoint request timeout in seconds (default 600) |
+| `VISION_FRAME_INTERVAL` | Seconds between stills for image input (default 2; minimum 1) |
+| `VISION_MAX_FRAMES` | Maximum stills per stretch (default 120; minimum 1) |
+| `VISION_MAX_SECONDS` | Approximate watched-duration budget (default 19200); rounded up to whole stretches |
+| `VISION_SEGMENT_SECONDS` | Stretch-size override; default 2400 for Gemini video, 600 for compatible video, interval × frame count for images; shared minimum 60 |
+| `VISION_MAX_SEGMENTS` | Explicit stretch-count limit; otherwise calculated from coverage budget and stretch size |
+
 
 **Client-side (encrypted in localStorage):**
 | Key | Description |
 |-----|------------|
-| `GEMINI_API_KEY` | Google Gemini — required unless `LLM_BASE_URL` is set (then only for layout picking and silent videos) |
+| `GEMINI_API_KEY` | Google Gemini — optional for clipping with a configured compatible endpoint; still used by separate Gemini features |
 | `FAL_KEY` | fal.ai — required for AI Shorts |
 | `ELEVENLABS_API_KEY` | ElevenLabs — required for voiceover/dubbing |
 | `UPLOAD_POST_API_KEY` | Upload-Post — required, for social posting |

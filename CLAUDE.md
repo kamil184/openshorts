@@ -73,7 +73,8 @@ Ingest (yt-dlp or upload) → transcription (word timestamps) → scene detectio
 
 **Clip selection**
 - The scoring pass ranks every window (global top N), never "choose up to K per batch". The `min_clips` floor is enforced in code.
-- `get_visual_clips` is the only stage that sends Gemini the video; past `VISION_SEGMENT_SECONDS` it watches near-equal stretches (`vision_segments`), never one upload of the whole source.
+- `get_visual_clips` is the only clip-pipeline stage that sends video to a model; it uses timestamped frames when the configured model accepts images but no video.
+  Past the configured stretch size (`VISION_SEGMENT_SECONDS` overrides the default), it watches near-equal stretches (`vision_segments`), never one upload of the whole source.
 
 **Jobs, GPU, deploys**
 - Call `transcribe_backends.release_models()` after any ASR (job processes and in-API transcriptions alike). Size `MAX_CONCURRENT_JOBS` by free VRAM first.

@@ -8,6 +8,7 @@ detail pass only ever reads the transcript.
 import pytest
 
 import prompts
+import llm_backend
 import hook_grounding as hg
 
 
@@ -76,23 +77,23 @@ def test_clip_words_uses_word_timestamps_and_falls_back_to_segment_text():
 # --- the rewrite -----------------------------------------------------------
 
 @pytest.fixture
-def gemini(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "k")
+def vision_model(monkeypatch):
+    monkeypatch.setattr(llm_backend, "image_model", lambda: "test-vision")
     monkeypatch.setattr(hg, "frames_at", lambda path, times, width=None: [b"jpg"] * len(times))
     seen = {}
 
-    def fake(frames, prompt, api_key):
+    def fake(frames, prompt, model_name):
         seen["frames"] = frames
         seen["prompt"] = prompt
         return {"on_screen": "Claude settings, MCP connector dialog for OpenShorts",
                 "viral_hook_text": "Conectando OpenShorts a Claude por MCP",
                 "video_title_for_youtube_short": "Así se conecta OpenShorts a Claude (MCP)"}
 
-    monkeypatch.setattr(hg, "_ask_gemini", fake)
+    monkeypatch.setattr(hg, "_ask_model", fake)
     return seen
 
 
-def test_rewrites_hook_and_title_and_keeps_the_originals(gemini):
+def test_rewrites_hook_and_title_and_keeps_the_originals(vision_model):
     clip = {"viral_hook_text": "He automatizado la creación de mis clips con IA.",
             "video_title_for_youtube_short": "Clips con IA",
             "layout_ranges": SCREEN}
@@ -105,32 +106,32 @@ def test_rewrites_hook_and_title_and_keeps_the_originals(gemini):
     assert clip["video_title_for_youtube_short"].startswith("Así se conecta")
     assert clip["hook_grounding"]["before"]["viral_hook_text"].startswith("He automatizado")
     assert changed["on_screen"].startswith("Claude settings")
-    assert len(gemini["frames"]) == 3
-    assert "añadimos el conector" in gemini["prompt"]
-    assert "He automatizado" in gemini["prompt"]  # the model sees the current hook
-    assert "TRANSCRIPT_LANGUAGE: es" in gemini["prompt"]
+    assert len(vision_model["frames"]) == 3
+    assert "añadimos el conector" in vision_model["prompt"]
+    assert "He automatizado" in vision_model["prompt"]  # the model sees the current hook
+    assert "TRANSCRIPT_LANGUAGE: es" in vision_model["prompt"]
 
 
-def test_without_a_gemini_key_the_transcript_hook_stands(monkeypatch):
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+def test_without_an_image_model_the_transcript_hook_stands(monkeypatch):
+    monkeypatch.setattr(llm_backend, "image_model", lambda: None)
     clip = {"viral_hook_text": "old", "layout_ranges": SCREEN}
     assert hg.reground("clip.mp4", clip, {"segments": []}, 0, 30) is None
     assert clip["viral_hook_text"] == "old" and "hook_grounding" not in clip
 
 
 def test_model_failure_never_touches_the_clip(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setattr(llm_backend, "image_model", lambda: "test-vision")
     monkeypatch.setattr(hg, "frames_at", lambda *a, **k: [b"jpg"])
-    monkeypatch.setattr(hg, "_ask_gemini", lambda *a: (_ for _ in ()).throw(RuntimeError("503")))
+    monkeypatch.setattr(hg, "_ask_model", lambda *a: (_ for _ in ()).throw(RuntimeError("503")))
     clip = {"viral_hook_text": "old", "layout_ranges": SCREEN}
     assert hg.reground("clip.mp4", clip, {"segments": []}, 0, 30) is None
     assert clip["viral_hook_text"] == "old"
 
 
 def test_empty_answer_keeps_the_old_hook(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setattr(llm_backend, "image_model", lambda: "test-vision")
     monkeypatch.setattr(hg, "frames_at", lambda *a, **k: [b"jpg"])
-    monkeypatch.setattr(hg, "_ask_gemini", lambda *a: {"viral_hook_text": ""})
+    monkeypatch.setattr(hg, "_ask_model", lambda *a: {"viral_hook_text": ""})
     clip = {"viral_hook_text": "old", "layout_ranges": SCREEN}
     assert hg.reground("clip.mp4", clip, {"segments": []}, 0, 30) is None
     assert clip["viral_hook_text"] == "old"

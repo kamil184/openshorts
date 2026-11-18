@@ -522,8 +522,8 @@ Transcript:
 
 def _ask_model(prompt, api_key):
     """One text call that must answer {"titles": [...]}. Split out so tests
-    can stub it. ``api_key`` is the caller's own Gemini key, used only when
-    the server configures no model (``llm_backend``)."""
+    can stub it. ``api_key`` is passed through to the facade for providers
+    that accept a per-request key."""
     from typing import List
 
     from pydantic import BaseModel

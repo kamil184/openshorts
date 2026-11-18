@@ -9,8 +9,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 
-# --- Structured output schemas (passed as response_schema so the API
-# --- guarantees the format instead of us repairing free-form JSON). ---
+# Structured output schemas, validated by the facade for every provider.
 
 class ScoredWindowModel(BaseModel):
     id: str

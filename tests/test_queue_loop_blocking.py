@@ -6,21 +6,19 @@ queue backed up there are thousands of job dirs, and reading every manifest
 every Stripe upsert, every resume scan and every metering sweep. The scans
 now read and rewrite on a worker thread; only the heap is touched on the loop.
 
-Each manifest read is made artificially slow here, so the test tells the two
-apart on any machine: inside the loop the stall would be the whole scan.
+The first read waits for the event loop to release it, proving that the loop
+can progress during a scan without depending on machine scheduling speed.
 """
 import asyncio
 import itertools
 import json
-import time
+import threading
 
 import pytest
 
 app_module = pytest.importorskip("app")
 
 N = 800                  # manifests
-READ_COST = 0.001        # seconds per manifest read -> ~0.8 s per full scan
-MAX_STALL = 0.15         # what the loop may be held, in seconds
 
 
 @pytest.fixture
@@ -48,51 +46,44 @@ def busy_disk(tmp_path, monkeypatch):
         app_module._enqueue_job(f"j{i}", 2)
     real = app_module._read_manifest
 
-    def slow_read(job_id):
-        time.sleep(READ_COST)
+    state = {"started": threading.Event(), "release": threading.Event(), "threads": []}
+
+    def gated_read(job_id):
+        state["threads"].append(threading.get_ident())
+        state["started"].set()
+        if not state["release"].wait(timeout=5):
+            raise AssertionError("event loop did not release the manifest read")
         return real(job_id)
-    monkeypatch.setattr(app_module, "_read_manifest", slow_read)
-    return root
+    monkeypatch.setattr(app_module, "_read_manifest", gated_read)
+    return state
 
 
-def _worst_stall(coro_fn):
+def _scan_with_live_loop(coro_fn, state):
     async def run():
-        worst, stop = 0.0, False
-
-        async def ticker():
-            nonlocal worst
-            last = time.perf_counter()
-            while not stop:
-                await asyncio.sleep(0.005)
-                now = time.perf_counter()
-                worst = max(worst, now - last - 0.005)
-                last = now
-        t = asyncio.create_task(ticker())
-        await asyncio.sleep(0.02)
-        started = time.perf_counter()
-        result = await coro_fn()
-        took = time.perf_counter() - started
-        stop = True
-        await t
-        return worst, took, result
+        loop_thread = threading.get_ident()
+        scan = asyncio.create_task(coro_fn())
+        try:
+            started = await asyncio.to_thread(state["started"].wait, 5)
+            progressed = started and not scan.done()
+        finally:
+            state["release"].set()
+        result = await scan
+        assert progressed, "event loop could not progress during a manifest scan"
+        assert len(state["threads"]) == N, "every manifest must be read"
+        assert all(t != loop_thread for t in state["threads"]), "manifest read ran on the event loop"
+        return result
     return asyncio.run(run())
 
 
 def test_reprioritize_keeps_the_loop_responsive(busy_disk):
-    worst, took, moved = _worst_stall(lambda: app_module.reprioritize_user_jobs("u7", 1))
+    moved = _scan_with_live_loop(lambda: app_module.reprioritize_user_jobs("u7", 1), busy_disk)
     assert moved == sum(1 for i in range(N) if i % 30 == 7)
-    assert took > 0.5, "the slow reads did happen"
-    assert worst < MAX_STALL, f"loop held {worst * 1000:.0f} ms"
 
 
 def test_follow_keeps_the_loop_responsive(busy_disk):
-    worst, took, _ = _worst_stall(app_module._follow_manifest_priorities)
-    assert took > 0.5
-    assert worst < MAX_STALL, f"loop held {worst * 1000:.0f} ms"
+    _scan_with_live_loop(app_module._follow_manifest_priorities, busy_disk)
 
 
 def test_live_reservations_keep_the_loop_responsive(busy_disk):
-    worst, took, live = _worst_stall(app_module._live_reservation_ids)
+    live = _scan_with_live_loop(app_module._live_reservation_ids, busy_disk)
     assert len(live) == N
-    assert took > 0.5
-    assert worst < MAX_STALL, f"loop held {worst * 1000:.0f} ms"
