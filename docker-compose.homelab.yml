@@ -1,9 +1,15 @@
-# Self-host overrides for a shared server: loopback-only ports and memory caps.
+# Self-host overrides for a shared server: loopback-only ports, 8 GB of memory caps in total,
+# and named volumes instead of the source bind mount (the image runs as a non-root user whose uid
+# differs from the host checkout owner, so it cannot write into a bind-mounted checkout).
 # Usage: docker compose -f docker-compose.yml -f docker-compose.homelab.yml up -d --build
 # Dashboard: ssh -N -L 5175:127.0.0.1:5175 <server>, then open http://localhost:5175
 services:
   backend:
     ports: !reset []
+    volumes: !override
+      - output:/app/output
+      - uploads:/app/uploads
+      - models:/app/.cache/huggingface
     mem_limit: 6g
     memswap_limit: 6g
     cpus: 6.0
@@ -18,10 +24,17 @@ services:
   frontend:
     ports: !override
       - "127.0.0.1:5175:5173"
-    mem_limit: 512m
+    mem_limit: 768m
     logging: *logging
 
   renderer:
     ports: !reset []
-    mem_limit: 1536m
+    volumes: !override
+      - output:/output
+    mem_limit: 1280m
     logging: *logging
+
+volumes:
+  output:
+  uploads:
+  models:
