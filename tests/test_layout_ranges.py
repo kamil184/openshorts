@@ -95,7 +95,6 @@ class TestSeamCaptions:
 
 class TestCaptionerReadsSidecar:
     def test_auto_caption_uses_sidecar_when_not_told(self, tmp_path, monkeypatch):
-        main = pytest.importorskip("main")
         clip = str(tmp_path / "x.mp4")
         open(clip, "wb").close()
         layout_ranges.write(clip, [(0, 3, "SPLIT")])
@@ -105,7 +104,7 @@ class TestCaptionerReadsSidecar:
             seen["split_ranges"] = kw.get("split_ranges")
             return False  # stop before ffmpeg
         monkeypatch.setattr(subtitles, "generate_ass", fake_generate_ass)
-        main.auto_caption_clip(clip, _transcript([(" a", 0.0, 0.5)]), 0.0, 3.0)
+        subtitles.auto_caption_clip(clip, _transcript([(" a", 0.0, 0.5)]), 0.0, 3.0)
         assert seen["split_ranges"] == [(0.0, 3.0)]
 
 

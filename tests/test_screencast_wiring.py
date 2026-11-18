@@ -6,13 +6,12 @@ reframe_v2.render was never given content ranges, so screen tutorials came out
 GENERAL/TRACK only, even when the user forced the layout (prod jobs 204da77a
 and 62f72a44). These tests pin the call and the fallback.
 """
-import sys
-import types
-
 import pytest
 
 import reframe_v2
+import scene_analysis
 import screencast_layout
+import vision
 from screencast_layout import (
     _parse_shots,
     fallback_ranges,
@@ -45,13 +44,18 @@ class _Stop(Exception):
 
 @pytest.fixture
 def fake_main(monkeypatch):
-    """A `main` with just what render() touches before routing screens."""
-    m = types.ModuleType("main")
-    m.detect_scenes = lambda path: (scenes_of((0, 90), (90, 300)), 30.0)
-    m.get_video_resolution = lambda path: (1920, 1080)
-    m.analyze_scenes_strategy = lambda path, scenes: ['TRACK', 'GENERAL']
-    monkeypatch.setitem(sys.modules, "main", m)
-    return m
+    """Stand-ins for what render() touches before routing screens. Past the
+    routing it stops at the camera: the trajectory pass would need a real file."""
+    monkeypatch.setattr(scene_analysis, "detect_scenes",
+                        lambda path: (scenes_of((0, 90), (90, 300)), 30.0))
+    monkeypatch.setattr(scene_analysis, "get_video_resolution", lambda path: (1920, 1080))
+    monkeypatch.setattr(scene_analysis, "analyze_scenes_strategy",
+                        lambda path, scenes: ['TRACK', 'GENERAL'])
+
+    def no_camera(*a, **k):
+        raise _Stop("reached the trajectory pass")
+
+    monkeypatch.setattr(vision, "SmoothedCameraman", no_camera)
 
 
 def _routed_ranges(monkeypatch):
@@ -273,8 +277,8 @@ class TestPresenterCamGate:
             raise _Stop()
 
         monkeypatch.setattr(reframe_v2.camera_inset, "detect_in_scene", in_scene)
-        # Past the routing render needs the real main (SmoothedCameraman);
-        # the fake one stops it there, which is fine: the gate ran before.
+        # Past the routing the fixture stops render at the camera, which is
+        # fine: the gate ran before.
         with pytest.raises(Exception):
             reframe_v2.render("clip.mp4", "out.mp4", 9 / 16)
         return calls

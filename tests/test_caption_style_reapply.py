@@ -68,12 +68,10 @@ def test_edited_words_are_reburned_verbatim(tmp_path, monkeypatch):
 
 def test_no_recorded_style_keeps_the_default_look(tmp_path, monkeypatch):
     job_id, video = _job(tmp_path, monkeypatch, {"start": 10.0, "end": 12.0})
-    import sys
-    import types
+    import subtitles
     calls = []
-    fake_main = types.SimpleNamespace(
-        auto_caption_clip=lambda *a, **k: calls.append(a) or "auto.mp4")
-    monkeypatch.setitem(sys.modules, "main", fake_main)
+    monkeypatch.setattr(subtitles, "auto_caption_clip",
+                        lambda *a, **k: calls.append(a) or "auto.mp4")
     monkeypatch.setattr(app_module, "_restyle_captions",
                         lambda *a, **k: pytest.fail("no style was recorded"))
     assert app_module._reapply_captions(job_id, 0, video) == "auto.mp4"

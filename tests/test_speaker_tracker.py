@@ -6,9 +6,7 @@ be missing from the current frame's candidates — a blink or one motion-blurred
 frame was enough, which is exactly when the cooldown is needed. Measured on a
 12s clip (25-jul-2026), 3 of 7 target switches jumped the cooldown this way.
 """
-import pytest
-
-main = pytest.importorskip("main")  # needs cv2/mediapipe, absent in minimal CI
+import vision
 
 WIDTH = 1280
 COOLDOWN = 30
@@ -21,7 +19,7 @@ def _face(center_x, size=120, score=None):
 
 
 def _tracker():
-    return main.SpeakerTracker(cooldown_frames=COOLDOWN)
+    return vision.SpeakerTracker(cooldown_frames=COOLDOWN)
 
 
 def _lock_onto(tracker, x, frame=0):
@@ -82,7 +80,7 @@ class TestJumpConfirmation:
     """A lone huge target jump is a detector error, not a person moving."""
 
     def _cam(self, crop=600, video_w=1920):
-        cam = main.SmoothedCameraman(crop, 1080, video_w, 1080,
+        cam = vision.SmoothedCameraman(crop, 1080, video_w, 1080,
                                      aspect_ratio=9 / 16)
         cam.target_center_x = 500.0
         return cam

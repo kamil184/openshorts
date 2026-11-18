@@ -2,17 +2,20 @@ import os
 import re
 import subprocess
 import sys
+import time
+import uuid
 
 from ffmpeg_utils import (video_encode_args, escape_filter_value, QUALITY,
                           METADATA_SCRUB, finished_before_crash)
 import gpu_decode
+import watermark_overlay
 
 
 _STDIO_CONFIGURED = False
 
 # Shared faster-whisper config so both transcription paths (this module and
-# main.transcribe_video) behave identically. "small" is meaningfully better at
-# German than "base" without being much slower on CPU.
+# transcribe_backends.transcribe_video) behave identically. "small" is
+# meaningfully better at German than "base" without being much slower on CPU.
 DEFAULT_WHISPER_MODEL = "small"
 
 
@@ -872,8 +875,9 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
 
     ``mark``: optional (logo_path, make_filter, path): ALSO write ``path`` =
     the captioned picture with the free-plan mark (the served ``wm_`` copy,
-    main.mark_delivery), from the same decode. ``make_filter(vw, vh, video=,
-    logo=, out=)`` is main.watermark_filter.
+    watermark_overlay.mark_delivery), from the same decode.
+    ``make_filter(vw, vh, video=, logo=, out=)`` is
+    watermark_overlay.watermark_filter.
     """
     vf = subtitles_filter(srt_path, alignment=alignment, fontsize=fontsize,
                           font_name=font_name, font_color=font_color,
@@ -914,3 +918,117 @@ def burn_subtitles(video_path, srt_path, output_path, alignment=2, fontsize=16,
 
     return True
 
+
+# The pipeline's caption pass over a finished clip (main.auto_caption_clip
+# before it moved here, so the API and recut reach it without the pipeline).
+def auto_caption_clip(clip_path, transcript, clip_start, clip_end, split_ranges=None,
+                      plan_only=False, mark=False, style=None):
+    """Burn the default caption style onto a finished clip.
+
+    ``split_ranges``: (start, end) stretches, in clip seconds, rendered with
+    the SPLIT layout; captions there sit on the seam between the two speakers
+    instead of the bottom. None reads the render's own sidecar next to
+    ``clip_path`` (layout_ranges), which is where recut hands it over.
+
+    Captions are mandatory for short-form to land, but they were opt-in behind a
+    modal and only 9% of delivered clips ever got them (prod audit, 25-jul-2026).
+    So every clip now ships captioned by default.
+
+    The captioned file is written ALONGSIDE the clip as
+    ``subtitled_<ts>_<clip>.mp4`` — the same convention /api/subtitle uses — so
+    the untouched original stays on disk and re-styling from the modal replaces
+    the captions instead of burning a second layer over them.
+
+    Returns the captioned path, or None when captions were skipped (silent
+    video, no words in range, AUTO_CAPTIONS=0, or any failure — a caption
+    problem must never cost the user the clip they already paid for).
+
+    ``plan_only`` writes the .ass but burns nothing: returns (vf,
+    generation_id) for auto_hook_clip to burn in the same pass as the hook.
+
+    ``mark`` (free plan): the same ffmpeg also writes the served ``wm_`` copy
+    of the captioned file, so mark_delivery finds it made.
+    """
+    if os.environ.get("AUTO_CAPTIONS", "1").strip() == "0":
+        return None
+    if not transcript or not transcript.get('segments'):
+        return None  # silent video: nothing to caption
+    try:
+        # ``style``: a CAPTION_PRESETS entry to burn instead of the default
+        # look (pro mode's captions); what it does not name stays the default.
+        style = {**AUTO_CAPTION_STYLE, **(style or {})}
+        output_dir = os.path.dirname(clip_path)
+        stem = os.path.basename(clip_path)
+        generation_id = int(time.time())
+        # The output name MUST stay exactly "subtitled_<ts>_<clip filename>":
+        # the modal's walk-back and _canonical_clip_file both reconstruct the
+        # clean original from it, so trimming the stem here would orphan the
+        # pair. Length is bounded upstream instead, by MAX_TITLE_BYTES at
+        # download time. A legacy clip whose name predates that budget can still
+        # overflow — that raises OSError 36, which the except below turns into
+        # "ship the clip uncaptioned" rather than a broken filename.
+        # The .ass path is interpolated INTO an ffmpeg filter string
+        # (-vf ass='...'), where a literal apostrophe closes the quote and
+        # breaks the filter. Titles carry apostrophes constantly in English
+        # ("Earth's", "Don't"), so this name must stay free of the clip stem —
+        # which is exactly why /api/subtitle has always used a neutral
+        # "subs_<i>_<ts>.ass". Deriving it from the stem silently cost captions
+        # on every apostrophe title until 29-jul-2026.
+        #
+        # The OUTPUT name still carries the stem, and must: the modal's
+        # walk-back and _canonical_clip_file reconstruct the clean original
+        # from it. That one is only ever passed as an argv element, never
+        # inside a filter string, so quoting never applies to it.
+        # Unique per clip, not just per second: clips render in parallel
+        # (CLIP_WORKERS), so a bare timestamp would collide and let one clip
+        # burn another's captions.
+        ass_path = os.path.join(
+            output_dir, f"autosubs_{generation_id}_{uuid.uuid4().hex[:8]}.ass")
+        out_path = os.path.join(output_dir, f"subtitled_{generation_id}_{stem}")
+
+        if split_ranges is None:
+            import layout_ranges as _layouts
+            split_ranges = _layouts.split_ranges(_layouts.read(clip_path))
+        if not generate_ass(
+                transcript, clip_start, clip_end, ass_path,
+                split_ranges=split_ranges,
+                max_chars=style["max_chars"], max_duration=style["max_duration"],
+                alignment=style["alignment"], fontsize=style["font_size"],
+                font_name=style["font_name"], font_color=style["font_color"],
+                border_color=style["border_color"], border_width=style["border_width"],
+                highlight_color=style["highlight_color"], effect=style["effect"],
+                base_opacity=style["base_opacity"], uppercase=style["uppercase"],
+                shadow=style.get("shadow", 0), reveal=style.get("reveal", False),
+                blur=style.get("blur", 0.0)):
+            print("   ℹ️ No words in range — clip ships without captions.")
+            return None
+
+        if plan_only:
+            vf = subtitles_filter(
+                ass_path, alignment=style["alignment"], fontsize=style["font_size"],
+                font_name=style["font_name"], font_color=style["font_color"],
+                border_color=style["border_color"], border_width=style["border_width"])
+            return vf, generation_id
+        marked = None
+        if mark and os.path.exists(watermark_overlay.watermark_logo_path()):
+            import watermarked
+            marked = (watermark_overlay.watermark_logo_path(),
+                      watermark_overlay.watermark_filter,
+                      os.path.join(output_dir, watermarked.marked_name(out_path)))
+        try:
+            burn_subtitles(
+                clip_path, ass_path, out_path,
+                alignment=style["alignment"], fontsize=style["font_size"],
+                font_name=style["font_name"], font_color=style["font_color"],
+                border_color=style["border_color"], border_width=style["border_width"],
+                mark=marked)
+        except Exception:
+            if marked and os.path.exists(marked[2]):
+                os.remove(marked[2])  # never serve a half-written wm_ copy
+            raise
+        print(f"   💬 Captions burned: {os.path.basename(out_path)}")
+        return out_path
+    except Exception as e:
+        print(f"   ⚠️ Auto-captions failed ({type(e).__name__}: {e}) — "
+              f"delivering the clip without them.")
+        return None

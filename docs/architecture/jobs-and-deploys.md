@@ -15,7 +15,7 @@ then check the CPU.
 
 Guards that keep the card from filling:
 
-- **Release the ASR model after transcribing.** `main.transcribe_video` calls
+- **Release the ASR model after transcribing.** `transcribe_backends.transcribe_video` calls
   `transcribe_backends.release_models()`; so do the in-process transcriptions in
   the API (thumbnail studio, `/api/subtitle` on a dubbed clip), otherwise the
   ASR singletons live in uvicorn for good. TransNetV2 `empty_cache()`s after each
@@ -57,7 +57,7 @@ Speed at equal quality:
 - **Silero VAD on one CPU thread** (`vad_load_kwargs`): on CUDA it ran one 32 ms
   chunk per launch.
 - **Blur at quarter size** (`ffmpeg_utils.blurred_backdrop`).
-- **Watermark as a served copy** (`main.mark_delivery`, see `watermark.md`):
+- **Watermark as a served copy** (`watermark_overlay.mark_delivery`, see `watermark.md`):
   after captions. It must not ride the reframe encode, which would make it
   permanent. The `wm_` copy is one more output of the ffmpeg that burns the
   captions (`add_hook_to_video(mark=)` with a hook, `burn_subtitles(mark=)`

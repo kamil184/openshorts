@@ -19,6 +19,7 @@ import os
 import numpy as np
 
 import frame_sampler
+import vision
 
 ENABLED = os.environ.get("SPLIT_LAYOUT", "0") == "1"
 
@@ -118,7 +119,7 @@ def analyze_scene(frames, frame_w):
     """Decide whether these sampled frames show a stackable two-shot.
 
     ``frames`` is a list of per-frame face candidate lists (same shape as
-    ``main.detect_face_candidates`` returns). Returns ``(left, right)`` face
+    ``vision.detect_face_candidates`` returns). Returns ``(left, right)`` face
     centres as (cx, cy) pairs, or None.
     """
     if not frames:
@@ -221,7 +222,6 @@ def detect_split_scenes(video_path, scenes, strategies, samples=None):
     touching the single-speaker material that is most of the corpus.
     """
     import cv2
-    import main as m
 
     if not ENABLED:
         return {}
@@ -272,7 +272,7 @@ def detect_split_scenes(video_path, scenes, strategies, samples=None):
                     continue
                 if frame.mean() < 16:  # fade to black, same as the classifier
                     continue
-                sampled.append(m.detect_face_candidates(frame))
+                sampled.append(vision.detect_face_candidates(frame))
 
             # Too few readable samples to call it: defaulting to GENERAL costs a
             # nicer layout, defaulting to SPLIT risks half a frame of nobody.

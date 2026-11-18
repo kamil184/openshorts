@@ -6,15 +6,13 @@ in SpeakerTracker both exist to reject noise INSIDE a shot, and across a cut
 they held the previous shot's subject while the new face sat unframed, then
 panned over to it. A cut must cut.
 """
-import pytest
-
-main = pytest.importorskip("main")  # needs cv2/mediapipe, absent in minimal CI
+import vision
 
 W, H = 1920, 1080
 
 
 def _cam():
-    cam = main.SmoothedCameraman(1080, 1920, W, H, aspect_ratio=9 / 16)
+    cam = vision.SmoothedCameraman(1080, 1920, W, H, aspect_ratio=9 / 16)
     cam.jump_confirm_frames = 3
     return cam
 
@@ -66,7 +64,7 @@ class TestCameramanBeginScene:
 
 class TestTrackerReset:
     def test_reset_releases_the_cooldown_hold(self):
-        t = main.SpeakerTracker(cooldown_frames=30)
+        t = vision.SpeakerTracker(cooldown_frames=30)
         for f in range(5):
             t.get_target([{"box": _box(300), "score": 1}], f, W)
         t.get_target([{"box": _box(1500), "score": 1}], 40, W)  # switch -> cooldown

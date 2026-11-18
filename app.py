@@ -1631,7 +1631,7 @@ def _strip_burned_hook(output_dir, filename):
 
 async def _deliver(request, job_id, filename):
     """The name to serve for a freshly derived clip file: the file itself, or
-    on the free plan its ``wm_`` copy (``main.mark_delivery``).
+    on the free plan its ``wm_`` copy (``watermark_overlay.mark_delivery``).
 
     Decided from the caller's plan right now, not from the job's flag: the
     flag is lost on a restart/restore, and a user who upgraded mid-session
@@ -1647,9 +1647,9 @@ async def _deliver(request, job_id, filename):
     # derivative already carries one and a copy would stack a second.
     if not watermarked.job_is_marked(output_dir):
         return filename
-    import main as _main
+    import watermark_overlay
     marked = await asyncio.get_event_loop().run_in_executor(
-        None, _main.mark_delivery, os.path.join(output_dir, filename))
+        None, watermark_overlay.mark_delivery, os.path.join(output_dir, filename))
     return os.path.basename(marked)
 
 
@@ -1741,8 +1741,8 @@ def _reapply_captions(job_id, clip_index, video_path):
             return _restyle_captions(video_path, transcript, start, end,
                                      clip['caption_style'],
                                      clip.get('layout_ranges'))
-        import main as _main
-        return _main.auto_caption_clip(video_path, transcript, start, end)
+        import subtitles
+        return subtitles.auto_caption_clip(video_path, transcript, start, end)
     except Exception as e:
         print(f"⚠️  Could not re-apply captions to {video_path}: {e}")
         return None
@@ -7737,7 +7737,8 @@ async def get_clip_scenes(job_id: str, clip_index: int, request: Request):
 
     def build():
         import cv2
-        import main as m
+        import scene_analysis
+        import vision
 
         # Stable for the files the browser fetches (no accumulation), unique
         # for the temp cut (no collision between overlapping requests).
@@ -7749,9 +7750,9 @@ async def get_clip_scenes(job_id: str, clip_index: int, request: Request):
         preview_path = os.path.join(output_dir, preview_name)
         work_path = _clip_scene_workfile(source_path, segments, output_dir, work_token)
         try:
-            scenes, fps = m.detect_scenes(work_path)
+            scenes, fps = scene_analysis.detect_scenes(work_path)
             fps = float(fps) or 30.0
-            orig_w, orig_h = m.get_video_resolution(work_path)
+            orig_w, orig_h = scene_analysis.get_video_resolution(work_path)
 
             cap = cv2.VideoCapture(work_path)
             if not scenes:
@@ -7774,7 +7775,7 @@ async def get_clip_scenes(job_id: str, clip_index: int, request: Request):
                     # Start the rectangle on the biggest face in the shot, so
                     # the common case is a nudge rather than a hunt.
                     try:
-                        faces = m.detect_face_candidates(frame)
+                        faces = vision.detect_face_candidates(frame)
                         if faces:
                             box = max(faces,
                                       key=lambda f: f['box'][2] * f['box'][3])['box']
@@ -9580,7 +9581,7 @@ async def thumbnail_upload(
                     url, session_id, paid_allowed=paid_allowed, cap_minutes=source_minutes)
                 thumbnail_sessions[session_id]["video_path"] = vpath
 
-            from main import transcribe_video
+            from transcribe_backends import transcribe_video
             loop = asyncio.get_event_loop()
             try:
                 transcript = await loop.run_in_executor(None, transcribe_video, vpath)
