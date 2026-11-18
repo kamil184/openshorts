@@ -350,6 +350,9 @@ def onnxruntime_device():
 
 
 PARAKEET_HF_REPO = "istupakov/parakeet-tdt-0.6b-v3-onnx"
+# "int8" loads the quantised twin: about a quarter of the weights in RAM and
+# faster on CPU, with the same model. Unset keeps the full-precision default.
+PARAKEET_QUANTIZATION = os.environ.get("PARAKEET_QUANTIZATION", "").strip() or None
 
 
 def _plain_parakeet_dir():
@@ -374,8 +377,8 @@ def _plain_parakeet_dir():
     tmp = tempfile.mkdtemp(dir=root, prefix=".copy-")
     try:
         for name in os.listdir(snap):
-            if "int8" in name:
-                continue          # the quantised twin is never loaded
+            if ("int8" in name) != (PARAKEET_QUANTIZATION == "int8"):
+                continue          # only the precision that gets loaded
             shutil.copyfile(os.path.join(snap, name), os.path.join(tmp, name))
         try:
             os.rename(tmp, target)
@@ -394,7 +397,8 @@ def _load_parakeet(onnx_asr):
     resolve outside the model file's directory: the load then fails on a
     fresh cache while an old one still works. Same files from a plain
     directory load fine, so that is the fallback."""
-    kwargs = dict(providers=parakeet_providers(), sess_options=parakeet_session_options())
+    kwargs = dict(providers=parakeet_providers(), sess_options=parakeet_session_options(),
+                  quantization=PARAKEET_QUANTIZATION)
     try:
         return onnx_asr.load_model(PARAKEET_MODEL_ID, **kwargs)
     except Exception as e:

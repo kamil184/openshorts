@@ -469,6 +469,22 @@ class TestOnnxruntimeDevice:
         assert ("parakeet runs on the CPU" in capsys.readouterr().out) is warned
 
 
+@pytest.mark.parametrize("setting,expected", [(None, None), ("int8", "int8")])
+def test_parakeet_load_passes_the_configured_quantization(monkeypatch, setting, expected):
+    seen = {}
+
+    def load_model(model, *args, **kwargs):
+        seen.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(tb, "PARAKEET_QUANTIZATION", setting)
+    monkeypatch.setattr(tb, "parakeet_providers", lambda: ["CPUExecutionProvider"])
+    monkeypatch.setattr(tb, "parakeet_session_options", lambda: None)
+    tb._load_parakeet(SimpleNamespace(load_model=load_model))
+
+    assert seen["quantization"] == expected
+
+
 # --- script drift repair -----------------------------------------------------
 
 def _drift_transcript():
