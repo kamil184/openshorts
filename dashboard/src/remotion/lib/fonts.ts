@@ -39,6 +39,30 @@ export const antonFontFace = `
 }
 `;
 
+/** Barlow Condensed ExtraBold (bundled, SIL OFL): the "headline" hook typeface. */
+export const BARLOW_CONDENSED_FONT_FAMILY = "BarlowCondensed-ExtraBold";
+
+export const barlowCondensedFontFace = `
+@font-face {
+  font-family: '${BARLOW_CONDENSED_FONT_FAMILY}';
+  src: url('${staticFile("fonts/BarlowCondensed-ExtraBold.ttf")}') format('truetype');
+  font-weight: 800;
+  font-style: normal;
+}
+`;
+
+/** Poppins ExtraBold (bundled, SIL OFL): default caption typeface. */
+export const POPPINS_FONT_FAMILY = "Poppins-ExtraBold";
+
+export const poppinsFontFace = `
+@font-face {
+  font-family: '${POPPINS_FONT_FAMILY}';
+  src: url('${staticFile("fonts/Poppins-ExtraBold.ttf")}') format('truetype');
+  font-weight: 800;
+  font-style: normal;
+}
+`;
+
 /**
  * Hook typefaces: CSS family + share of the 90% box width used as font size.
  * Must mirror hooks.py HOOK_FONTS.
@@ -46,6 +70,7 @@ export const antonFontFace = `
 export const HOOK_FONTS: Record<string, { family: string; weight: number; factor: number }> = {
   montserrat: { family: `'${MONTSERRAT_FONT_FAMILY}', 'Montserrat', sans-serif`, weight: 800, factor: 0.064 },
   anton: { family: `'${ANTON_FONT_FAMILY}', Impact, sans-serif`, weight: 400, factor: 0.08 },
+  condensed: { family: `'${BARLOW_CONDENSED_FONT_FAMILY}', 'Barlow Condensed', Impact, sans-serif`, weight: 800, factor: 0.08 },
   serif: { family: `'${NOTO_SERIF_FONT_FAMILY}', 'Noto Serif', Georgia, serif`, weight: 700, factor: 0.05 },
 };
 
@@ -62,6 +87,7 @@ export const SUBTITLE_FONTS: Record<string, string> = {
   "Courier New": "'Courier New', Courier, monospace",
   Anton: `'${ANTON_FONT_FAMILY}', Impact, sans-serif`,
   "Montserrat ExtraBold": `'${MONTSERRAT_FONT_FAMILY}', 'Montserrat', sans-serif`,
+  "Poppins ExtraBold": `'${POPPINS_FONT_FAMILY}', 'Poppins', sans-serif`,
 };
 
 export function getFontStack(fontFamily: string): string {
