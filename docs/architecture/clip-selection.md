@@ -74,8 +74,20 @@ Layout picking, subtitle detection, screen detection and hook grounding use an i
 A job submitted to `/api/process` can pass `preset=<name>` to load a YAML profile from the directory named by `PRESETS_DIR`.
 Unknown preset names or invalid YAML files fail at request time with HTTP `400`.
 Preset fields expand into job defaults before request validation, and any field sent explicitly by the caller always wins.
-A preset supports `clip_format`, `layouts`, `target_clips`, `clip_seconds` (`[min, max]`, mapped to `clip_min_seconds` and `clip_max_seconds`), `auto_hook`, and a `captions` block.
+A preset supports `clip_format`, `layouts`, `target_clips`, `clip_seconds` (`[min, max]`, mapped to `clip_min_seconds` and `clip_max_seconds`), `auto_hook`, `trim_dead_footage` (see below), and a `captions` block.
 Under `captions`, `language` overrides the copy language in the selection prompts, `required_tags` lists hashtags that must appear in TikTok and Instagram descriptions, `mention_one_of` lists creator names where at least one must appear, and `extra_instructions` appends free-form guidance to the prompt.
 See `presets.example/stream-gaming.yaml` for a generic example profile.
 At metadata finalisation in `main.py`, missing `required_tags` are appended to `video_description_for_tiktok` and `video_description_for_instagram` without modifying compliant text.
 Missing `mention_one_of` names across those descriptions or `video_title_for_youtube_short` are never invented and are recorded in `clip['caption_issues']` instead.
+
+## Dead footage at clip edges (`dead_footage.py`)
+
+Clips are picked from the transcript, so an edge can land on a loading screen, a black transition, a frozen frame or a static menu while the speaker keeps talking.
+Right after selection, before any clip is cut, `dead_footage.apply` measures the first and last `CLIP_DEAD_TRIM_MAX_SECONDS` (default 12) of every clip and moves the boundary inward past dead footage.
+It decodes those stretches as 160x90 greyscale at 4 frames per second with ffmpeg; the facecam box (`GAMING_FACECAM_BOX`) is masked out, so a moving face over a loading screen does not count as action.
+A sample is dead when the one-second median frame difference is below 0.15 (frozen), or when the frame is dark and flat (mean luma below 40, spread below 40) with a median difference below 2 (loading screens with a spinner, black frames, fades).
+Only a dead stretch of at least 1.5 s touching the clip edge is trimmed; live islands of up to 1.5 s inside it (a scene cut, a second of a menu) do not break it.
+The cut never falls inside a word: it lands in a pause of at least 0.3 s that reaches into the dead stretch, so every word removed was spoken entirely over dead footage, and speech running through the whole dead stretch is kept.
+An edge moves by at least 1 s or not at all, and never so far that the clip drops under the minimum clip length; when both edges cannot be trimmed, the larger trim wins.
+A trimmed clip keeps its earlier range in `dead_trim`.
+`CLIP_DEAD_TRIM=0` turns it off and `CLIP_DEAD_TRIM=1` on; otherwise the preset's `trim_dead_footage` decides, and the default is on.

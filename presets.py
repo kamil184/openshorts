@@ -19,7 +19,7 @@ ACTIVE_PRESET_ENV = "CLIP_PRESET"
 _PRESET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _TOP_KEYS = frozenset({
     "clip_format", "facecam_box", "layouts", "target_clips", "clip_seconds",
-    "auto_hook", "captions",
+    "auto_hook", "captions", "trim_dead_footage",
 })
 _CAPTION_KEYS = frozenset({
     "language", "required_tags", "mention_one_of", "extra_instructions",
@@ -201,6 +201,12 @@ def validate_preset(data: Any, *, name: str = "") -> dict[str, Any]:
         if not isinstance(ah, bool):
             raise PresetValidationError("Preset 'auto_hook' must be a boolean.")
         out["auto_hook"] = ah
+
+    if data.get("trim_dead_footage") is not None:
+        tdf = data["trim_dead_footage"]
+        if not isinstance(tdf, bool):
+            raise PresetValidationError("Preset 'trim_dead_footage' must be a boolean.")
+        out["trim_dead_footage"] = tdf
 
     if data.get("captions") is not None:
         captions = _validate_captions(data["captions"])

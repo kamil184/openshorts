@@ -2987,6 +2987,10 @@ if __name__ == '__main__':
                 "Clip detection failed — the AI model did not return usable clips for this video.")
         else:
             print(f"🔥 Found {len(clips_data['shorts'])} clips!")
+            # Picked from the transcript, so an edge can sit on a loading
+            # screen or a frozen frame: move it inward before anything is cut.
+            import dead_footage
+            dead_footage.apply(input_video, clips_data['shorts'], transcript)
 
             # Save metadata. Silent videos have no transcript → no subtitles,
             # which is correct (there's no speech to caption).

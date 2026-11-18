@@ -5,6 +5,7 @@ layouts: [screencast]
 target_clips: 6
 clip_seconds: [20, 60]
 auto_hook: true
+trim_dead_footage: true   # move clip edges off loading screens, black and frozen frames
 captions:
   language: en
   required_tags: ["#tag1", "#tag2"]
