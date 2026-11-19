@@ -19,6 +19,24 @@ npm run lint                     # ESLint, --max-warnings 0
 pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 8000
 pytest tests/ -v                 # CI runs this without the heavy ML stack
+pytest -m e2e -v                 # full real-media reference run (needs E2E_FIXTURE + E2E_REFERENCE_DIR)
+```
+
+### E2E Reference Run
+
+The `tests/e2e/` suite runs the real `main.py` pipeline end-to-end against a deterministic local HTTP LLM server (`tests/e2e/fake_llm.py`) in two sequential configurations: default tracking (`TRACK`) and stacked gaming layout (`CLIP_FORMAT=gaming_stack`), both with auto captions and auto hooks enabled.
+Normal `pytest tests/` runs skip the `e2e` marker by default (`addopts = "-m 'not e2e'"` in `pyproject.toml`).
+Record or verify against a saved reference with `tests/e2e/run_reference.py`:
+
+```bash
+python tests/e2e/run_reference.py --fixture /path/to/fixture.mp4 --reference /path/to/ref --record
+python tests/e2e/run_reference.py --fixture /path/to/fixture.mp4 --reference /path/to/ref
+```
+
+Or run via pytest by setting `E2E_FIXTURE`, `E2E_REFERENCE_DIR`, and optional `E2E_RECORD=1`:
+
+```bash
+E2E_FIXTURE=/path/to/fixture.mp4 E2E_REFERENCE_DIR=/path/to/ref pytest -m e2e -v
 ```
 
 ## Pipeline
