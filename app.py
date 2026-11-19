@@ -1085,12 +1085,23 @@ def _job_last_run(job) -> float:
     return float((job or {}).get('last_run') or (job or {}).get('run_started') or 0)
 
 
-def _entry_key(priority, job_id, old_key=None) -> float:
+def _newest_first_lanes() -> frozenset:
+    """The free lanes that serve newest first right now. It reads the
+    configuration, so a pass over the whole heap asks once and hands the
+    answer to every ``_entry_key``."""
+    if not _saturation_on():
+        return frozenset()
+    return frozenset(lane for lane in (_queue_mode.NORMAL, _queue_mode.SLOW)
+                     if _queue_mode.recent_first(lane))
+
+
+def _entry_key(priority, job_id, old_key=None, newest=None) -> float:
     """Heap key of ``job_id`` at ``priority``. FIFO: its submission time.
     Newest first: minus the later of its submission and its last run, so a
     video cut by a drain or auto-retried counts as recent there and is not
     left at the back behind every newer arrival. Without a record the old
-    key's time stands (``abs``: keys are signed times)."""
+    key's time stands (``abs``: keys are signed times). ``newest`` is
+    ``_newest_first_lanes()`` when the caller already has it."""
     job = jobs.get(job_id)
     if job is not None:
         sub, last = _job_arrival(job_id), _job_last_run(job)
@@ -1098,16 +1109,42 @@ def _entry_key(priority, job_id, old_key=None) -> float:
         sub = last = abs(float(old_key))
     else:
         sub = last = _arrival_now()
-    if (_saturation_on() and priority >= _queue_mode.FREE_PRIORITY
-            and _queue_mode.recent_first(_queue_mode.lane_of_priority(priority))):
+    if newest is None:
+        newest = _newest_first_lanes()
+    if (priority >= _queue_mode.FREE_PRIORITY
+            and _queue_mode.lane_of_priority(priority) in newest):
         return -max(sub, last)
     return sub
 
 
+def _queue_one(job_id: str, priority: int = 2, slow_on=None, newest=None):
+    priority = _queue_mode.effective_priority(priority, slow_on)
+    job_queue.put_nowait((priority, _entry_key(priority, job_id, newest=newest), job_id))
+
+
 def _enqueue_job(job_id: str, priority: int = 2):
-    # A slow-lane job folds into the normal lane while the slow lane is off.
-    priority = _queue_mode.effective_priority(priority)
-    job_queue.put_nowait((priority, _entry_key(priority, job_id), job_id))
+    _queue_one(job_id, priority)
+    _queue_changed()
+
+
+_DEFAULT_ENQUEUE_JOB = _enqueue_job
+
+
+def _enqueue_jobs(entries):
+    """Queue each ``(job_id, priority)``; the lane policy is read once for
+    the whole batch. A slow-lane job folds into the normal lane while the
+    slow lane is off."""
+    if not entries:
+        return
+    # Respect tests that monkeypatch _enqueue_job directly instead of replacing
+    # the batch helper.
+    if _enqueue_job is not _DEFAULT_ENQUEUE_JOB:
+        for job_id, priority in entries:
+            _enqueue_job(job_id, priority)
+        return
+    slow_on, newest = _queue_mode.slow_lane_on(), _newest_first_lanes()
+    for job_id, priority in entries:
+        _queue_one(job_id, priority, slow_on, newest)
     _queue_changed()
 
 
@@ -1120,10 +1157,11 @@ def _fold_slow_lane() -> int:
         return 0
     heap = job_queue._queue
     moved = 0
+    newest = _newest_first_lanes()
     for i, (prio, key, jid) in enumerate(heap):
         if prio >= _queue_mode.SLOW_PRIORITY:
             heap[i] = (_queue_mode.FREE_PRIORITY,
-                       _entry_key(_queue_mode.FREE_PRIORITY, jid, key), jid)
+                       _entry_key(_queue_mode.FREE_PRIORITY, jid, key, newest), jid)
             moved += 1
     if moved:
         heapq.heapify(heap)
@@ -1209,11 +1247,12 @@ async def _move_backlog_to_slow_lane() -> int:
     slow = {jid for jid, owner in cand.items()
             if _queue_mode.lane_for("free", countries.get(owner)) == _queue_mode.SLOW}
     moved = []
+    newest = _newest_first_lanes()
     for i, (prio, key, jid) in enumerate(heap):
         if (jid in slow and prio == _queue_mode.FREE_PRIORITY
                 and (jobs.get(jid) or {}).get('status') == 'queued'):
             heap[i] = (_queue_mode.SLOW_PRIORITY,
-                       _entry_key(_queue_mode.SLOW_PRIORITY, jid, key), jid)
+                       _entry_key(_queue_mode.SLOW_PRIORITY, jid, key, newest), jid)
             jobs[jid]['lane'] = _queue_mode.SLOW
             moved.append(jid)
     if not moved:
@@ -1231,12 +1270,13 @@ def _rekey_lanes(lanes=None):
     mode. The queue's size and waiters do not change. Loop thread only."""
     heap = job_queue._queue
     changed = False
+    newest = _newest_first_lanes()
     for i, (prio, key, jid) in enumerate(heap):
         if prio < _queue_mode.FREE_PRIORITY:
             continue
         if lanes is not None and _queue_mode.lane_of_priority(prio) not in lanes:
             continue
-        new = _entry_key(prio, jid, key)
+        new = _entry_key(prio, jid, key, newest)
         if new != key:
             heap[i] = (prio, new, jid)
             changed = True
@@ -1269,10 +1309,11 @@ def _raise_queued(new_priority_for) -> list:
     Loop thread only."""
     heap = job_queue._queue
     moved = []
+    newest = _newest_first_lanes()
     for i, (prio, key, jid) in enumerate(heap):
         new = new_priority_for(jid, prio)
         if new is not None and int(new) < prio:
-            heap[i] = (int(new), _entry_key(int(new), jid, key), jid)
+            heap[i] = (int(new), _entry_key(int(new), jid, key, newest), jid)
             moved.append(jid)
     if moved:
         heapq.heapify(heap)
@@ -2441,8 +2482,24 @@ def _register_resumed(picked, clear_remote: bool = True) -> int:
     """Loop part of the resume scan: a record and a heap entry per picked
     manifest. The heap orders them by submission time, whatever order the
     directory listing gave."""
-    resumed = 0
+    resumed, queued = 0, []
+    # Rebuild env from scratch — the manifest holds no secrets. Managed
+    # (cloud) jobs get the server key; self-host falls back to its env key.
+    # What every job shares is worked out once for the batch.
     base_env = child_env()
+    try:
+        from cloud import proxy_ledger as _pl
+        if BILLING_ENABLED and _pl.budget_exceeded_sync():
+            base_env.pop("PROXY_URL", None)  # daily paid-proxy budget hit
+    except Exception:
+        pass
+    slow_on = _queue_mode.slow_lane_on()
+    managed = None   # (key,) once the server key is known
+    if BILLING_ENABLED:
+        try:
+            managed = (managed_keys.gemini_key(),)
+        except Exception:
+            pass
     for job_id, m in picked:
         if job_id in jobs:
             continue  # registered while the disk was being read
@@ -2450,20 +2507,9 @@ def _register_resumed(picked, clear_remote: bool = True) -> int:
         reservation_id = m.get("reservation_id")
         attempts = int(m.get("attempts", 0))
         job_path = os.path.join(OUTPUT_DIR, job_id)
-        # Rebuild env from scratch — the manifest holds no secrets. Managed
-        # (cloud) jobs get the server key; self-host falls back to its env key.
         env = dict(base_env)
-        try:
-            from cloud import proxy_ledger as _pl
-            if BILLING_ENABLED and _pl.budget_exceeded_sync():
-                env.pop("PROXY_URL", None)  # daily paid-proxy budget hit
-        except Exception:
-            pass
-        if BILLING_ENABLED and user_id is not None:
-            try:
-                env["GEMINI_API_KEY"] = managed_keys.gemini_key()
-            except Exception:
-                pass
+        if user_id is not None and managed is not None:
+            env["GEMINI_API_KEY"] = managed[0]
         if m.get("watermark"):
             env["WATERMARK"] = "1"
         else:
@@ -2505,7 +2551,7 @@ def _register_resumed(picked, clear_remote: bool = True) -> int:
             # clock and its newest-first place count from that run.
             'last_run': float(m.get("run_started") or m.get("heartbeat") or 0) or None,
             # A manifest without a lane predates the lanes: normal lane.
-            'lane': _queue_mode.lane_of_priority(_queue_mode.effective_priority(priority)),
+            'lane': _queue_mode.lane_of_priority(_queue_mode.effective_priority(priority, slow_on)),
             'submitted_at': float(m["submitted_at"] if m.get("submitted_at") is not None else time.time()),
         }
         if m.get("stage") == _DELIVERY_STAGE:
@@ -2516,10 +2562,11 @@ def _register_resumed(picked, clear_remote: bool = True) -> int:
             _pending_deliveries.append(job_id)
             resumed += 1
             continue
-        _enqueue_job(job_id, priority)
+        queued.append((job_id, priority))
         if user_id is not None:
             _owner_plan_pending.add(job_id)  # raised to the owner's plan now
         resumed += 1
+    _enqueue_jobs(queued)
     if resumed:
         print(f"♻️  Re-enqueued {resumed} interrupted job(s) after restart.")
     return resumed

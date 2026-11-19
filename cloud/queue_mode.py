@@ -171,11 +171,14 @@ def slow_lane_on() -> bool:
     return is_enabled() and not killed() and bool(slow_countries())
 
 
-def effective_priority(priority) -> int:
+def effective_priority(priority, slow_on=None) -> int:
     """The priority to queue at now: the slow lane folds into the normal one
-    while it is switched off (kill switch, empty list)."""
+    while it is switched off (kill switch, empty list). ``slow_on`` is
+    ``slow_lane_on()`` when the caller already has it."""
     priority = int(priority)
-    if priority >= SLOW_PRIORITY and not slow_lane_on():
+    if slow_on is None:
+        slow_on = slow_lane_on()
+    if priority >= SLOW_PRIORITY and not slow_on:
         return FREE_PRIORITY
     return priority
 
