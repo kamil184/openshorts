@@ -6,7 +6,6 @@ the frames the full pass did and ends with the same crop trajectory.
 """
 import re
 import subprocess
-import sys
 import types
 
 import numpy as np
@@ -14,6 +13,7 @@ import pytest
 
 import gpu_decode
 import reframe_v2
+import vision
 
 
 # --- command rewrites -------------------------------------------------------
@@ -173,11 +173,11 @@ def fake_main(monkeypatch):
         seen.append(("yolo", n))
         return [n % 70, 0, 6, 6]
 
-    m = types.SimpleNamespace(
-        DETECT_STRIDE=4, YOLO_FALLBACK_STRIDE=8, SCENE_CUT_RESET=True,
-        detect_face_candidates=detect_face_candidates,
-        detect_person_yolo=detect_person_yolo)
-    monkeypatch.setitem(sys.modules, "main", m)
+    monkeypatch.setattr(vision, "DETECT_STRIDE", 4)
+    monkeypatch.setattr(vision, "YOLO_FALLBACK_STRIDE", 8)
+    monkeypatch.setattr(vision, "SCENE_CUT_RESET", True)
+    monkeypatch.setattr(vision, "detect_face_candidates", detect_face_candidates)
+    monkeypatch.setattr(vision, "detect_person_yolo", detect_person_yolo)
     return seen
 
 

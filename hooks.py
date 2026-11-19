@@ -744,8 +744,8 @@ def add_hook_to_video(video_path, text, output_path, position="top", font_scale=
       it the first time it is asked for (``HOOK_LAZY=0``: encode it here).
     mark: optional (logo_path, make_filter, path), only with ``also``: ALSO
       write ``path`` = the captioned picture with the free-plan mark, from the
-      same decode (the served ``wm_`` copy, see main.mark_delivery).
-      ``make_filter(vw, vh, video=, logo=, out=)`` is main.watermark_filter.
+      same decode (the served ``wm_`` copy, see watermark_overlay.mark_delivery).
+      ``make_filter(vw, vh, video=, logo=, out=)`` is watermark_overlay.watermark_filter.
     """
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video {video_path} not found")

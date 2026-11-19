@@ -34,7 +34,7 @@ import gpu_decode
 _TN2_W, _TN2_H = 48, 27
 
 # One shared model instance; clips can process in parallel (CLIP_WORKERS) so
-# inference is serialized like the other detectors in main.py.
+# inference is serialized like the other detectors in vision.py.
 _TN2_LOCK = threading.Lock()
 _tn2_model = None
 

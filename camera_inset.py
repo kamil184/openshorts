@@ -21,6 +21,7 @@ them with margin.
 import os
 
 from ffmpeg_utils import blurred_backdrop
+import vision
 
 CORNER_MARGIN = 0.20   # a subject this far from an edge (as a fraction of the
                        # frame) still counts as anchored to it
@@ -199,7 +200,6 @@ def detect(video_path, samples=10):
     """
     import cv2
     import numpy as np
-    import main as m
     import screencast_layout
 
     cap = cv2.VideoCapture(video_path)
@@ -227,7 +227,7 @@ def detect(video_path, samples=10):
             if faces:
                 box = max(faces, key=lambda c: c['score'])['box']
             else:
-                box = m.detect_person_yolo(frame)
+                box = vision.detect_person_yolo(frame)
             if not box:
                 continue
             if not is_cornered(box, frame_w, frame_h):
@@ -306,7 +306,6 @@ def detect_in_scene(video_path, start_f, end_f, samples=5):
     """
     import cv2
     import numpy as np
-    import main as m
     import screencast_layout
 
     if end_f - 1 < start_f:
@@ -328,7 +327,7 @@ def detect_in_scene(video_path, start_f, end_f, samples=5):
                 box = max(faces, key=lambda c: c['score'])['box']
                 widen = OVERLAY_FACE_WIDTHS
             else:
-                box = m.detect_person_yolo(frame)
+                box = vision.detect_person_yolo(frame)
                 widen = INSET_PADDING
             if not box or box[3] > frame_h * MAX_SUBJECT_HEIGHT:
                 continue
@@ -362,7 +361,6 @@ def present_in_scene(video_path, box, start_f, end_f, samples=3):
     """
     import cv2
     import numpy as np
-    import main as m
     import screencast_layout
 
     if end_f - 1 < start_f:
@@ -380,7 +378,7 @@ def present_in_scene(video_path, box, start_f, end_f, samples=3):
                 continue
             dets = [c['box'] for c in screencast_layout.detect_faces_full_res(frame)]
             if not any(_centre_inside(d, box, slack) for d in dets):
-                person = m.detect_person_yolo(frame)
+                person = vision.detect_person_yolo(frame)
                 dets = [person] if person else []
             if any(_centre_inside(d, box, slack) for d in dets):
                 hits += 1

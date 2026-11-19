@@ -355,8 +355,11 @@ class TestFilterQuoting:
     def test_generated_subtitle_paths_carry_no_apostrophe(self):
         # Both generators must name their own file, never derive it from a
         # video title. This is the property that actually prevents the bug.
+        import inspect
         import re
-        src = open("main.py").read()
+
+        import subtitles
+        src = inspect.getsource(subtitles.auto_caption_clip)
         m = re.search(r'ass_path = os\.path\.join\(\s*output_dir,\s*f"([^"]+)"', src)
         assert m, "auto-caption .ass path not found"
         assert "{stem}" not in m.group(1), (
@@ -365,8 +368,11 @@ class TestFilterQuoting:
     def test_auto_caption_ass_name_is_unique_per_clip(self):
         # Clips render in parallel; a bare timestamp collides and lets one clip
         # burn another's captions.
+        import inspect
         import re
-        src = open("main.py").read()
+
+        import subtitles
+        src = inspect.getsource(subtitles.auto_caption_clip)
         m = re.search(r'ass_path = os\.path\.join\(\s*output_dir,\s*f"([^"]+)"', src)
         assert "uuid" in m.group(1), f"not unique per clip: {m.group(1)}"
 

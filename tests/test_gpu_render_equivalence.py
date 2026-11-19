@@ -161,7 +161,7 @@ def test_scenes_concatenate_like_segments(source, tmp_path):
 
 
 def test_watermark_overlay_matches_ffmpeg(source, tmp_path):
-    import main as m
+    import watermark_overlay as m
     logo = tmp_path / "logo.png"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
                     "color=c=white:s=600x180,format=rgba", "-frames:v", "1", str(logo)], check=True)

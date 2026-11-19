@@ -3,9 +3,9 @@ Recut engine for the clip editor: a per-clip EDL (list of source segments) is
 turned into a rendered clip.
 
 The pure helpers here are standard-library only (plus ffmpeg_utils, which is
-also light) so the module imports in the thin CI environment; everything heavy
-(reframing, watermark, auto-captions live in main.py) is imported lazily and
-only on the paths that need it.
+also light) so the module imports in the thin CI environment. The reframe
+lives in main.py and is imported lazily, only on the paths that need it; the
+watermark (watermark_overlay) and the caption pass (subtitles) are light.
 
 Two render paths:
 
@@ -26,6 +26,8 @@ import uuid
 
 from ffmpeg_utils import (METADATA_SCRUB, QUALITY_FAST, audio_encode_args,
                           video_encode_args)
+import subtitles
+import watermark_overlay
 
 # EDL limits. Deliberately generous — the editor is for humans fixing cuts,
 # not for stitching feature films.
@@ -328,11 +330,11 @@ def perform_recut(*, input_path, segments, output_dir, clean_name,
                 layout_ranges.read(input_path), segments))
 
         if watermark:
-            (watermarker or _main_attr("apply_watermark"))(out_path)
+            (watermarker or watermark_overlay.apply_watermark)(out_path)
 
         served_name = out_name
         if captions_transcript and captions_transcript.get("segments"):
-            caption = captioner or _main_attr("auto_caption_clip")
+            caption = captioner or subtitles.auto_caption_clip
             captioned = caption(out_path, captions_transcript,
                                 0.0, total_duration(segments))
             if captioned:

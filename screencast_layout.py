@@ -6,7 +6,7 @@ the 9:16 crop keeps a centre strip, and the chart or headline the shot is
 actually about comes out sliced mid-word.
 
 The two previous attempts tried to find that content in pixels and both failed
-(see the note above analyze_scenes_strategy in main.py): edge density and MSER
+(see the note above analyze_scenes_strategy in scene_analysis.py): edge density and MSER
 text density BOTH score ordinary detailed footage higher than a clean panel of
 text, because they measure visual busyness rather than meaning. The third
 attempt asked Gemini and detected well, but decided badly: it flagged corner
@@ -35,6 +35,8 @@ shrinks a screen into an unreadable strip.
 import os
 
 import numpy as np
+
+import vision
 
 ENABLED = os.environ.get("SCREENCAST_LAYOUT", "0") == "1"
 
@@ -72,7 +74,7 @@ MAX_CONTENT_BAND = 0.55
 
 # A person this tall (fraction of the frame height) in a "screen" shot is
 # standing in a filmed room, not laid over a screen (_filmed_person).
-# main.detect_person_yolo keeps the top 40% of the YOLO box (head and chest).
+# vision.detect_person_yolo keeps the top 40% of the YOLO box (head and chest).
 FILMED_PERSON_HEIGHT = 0.6
 PERSON_BOX_SHARE = 0.4
 
@@ -158,7 +160,7 @@ def screencast_filtergraph(orig_w, orig_h, out_w, out_h, face_centre, content):
 def detect_faces_full_res(frame):
     """Face boxes from the UNSCALED frame, in original coordinates.
 
-    main.detect_face_candidates() runs detection on a 640px copy, which is the
+    vision.detect_face_candidates() runs detection on a 640px copy, which is the
     right trade for a talking head whose face spans a third of the frame. A
     presenter inset into a screen recording does not survive it: measured on a
     1920x1080 Excel walkthrough, the presenter's ~110px face becomes ~37px at
@@ -167,12 +169,12 @@ def detect_faces_full_res(frame):
     screencast candidates only.
     """
     import cv2
-    import main as m
 
     h, w, _ = frame.shape
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    with m.DETECT_LOCK:
-        results = m.face_detection.process(rgb)
+    detector = vision.face_detector()
+    with vision.DETECT_LOCK:
+        results = detector.process(rgb)
     if not results.detections:
         return []
 
@@ -596,7 +598,7 @@ def wide_action_centre(video_path, start_f, end_f, frac,
         cap.release()
 
 
-def _filmed_person(cap, m, s_f, last_f, samples=3):
+def _filmed_person(cap, detectors, s_f, last_f, samples=3):
     """True when most samples show a person standing in the shot at full size.
 
     A presenter laid over a screen recording is small: 22-40% of the frame
@@ -616,7 +618,7 @@ def _filmed_person(cap, m, s_f, last_f, samples=3):
         ok, frame = cap.read()
         if not ok:
             continue
-        person = m.detect_person_yolo(frame)
+        person = detectors.detect_person_yolo(frame)
         # detect_person_yolo returns the top PERSON_BOX_SHARE of the body.
         if person and person[3] / PERSON_BOX_SHARE >= FILMED_PERSON_HEIGHT * frame_h:
             hits += 1
@@ -641,10 +643,7 @@ def detect_screencast_scenes(video_path, scenes, strategies, ranges, samples=6):
     """
     if not ENABLED or not ranges:
         return {}
-    # Below the gate on purpose: main pulls torch/mediapipe, and the disabled
-    # path (the default, and what CI exercises) must not pay that import.
     import cv2
-    import main as m
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -675,7 +674,7 @@ def detect_screencast_scenes(video_path, scenes, strategies, ranges, samples=6):
             # him into a strip. The face classifier frames that shot best.
             # An edited split screen with a full-size presenter goes the same
             # way and loses its slide, which is the lesser harm.
-            if _filmed_person(cap, m, s_f, last_f):
+            if _filmed_person(cap, vision, s_f, last_f):
                 continue
 
             # Content that fills the frame has the presenter on top of it, so
@@ -695,7 +694,7 @@ def detect_screencast_scenes(video_path, scenes, strategies, ranges, samples=6):
                 # The body's horizontal extent, so the content band can leave
                 # the person out: YOLO's box when it finds one, else head and
                 # shoulders around the face.
-                person = m.detect_person_yolo(frame)
+                person = vision.detect_person_yolo(frame)
                 if centre is None and person:
                     # A presenter keyed into the corner of a screen recording is
                     # often too small for BlazeFace even at full resolution

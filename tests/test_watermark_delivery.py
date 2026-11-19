@@ -8,7 +8,7 @@ a user who paid fifteen minutes after their first job and found the mark still
 there on every download and every restyle.
 
 Now every file the pipeline and the editor write is clean, the served file on
-the free plan is a ``wm_`` twin of the final one (``main.mark_delivery``), both
+the free plan is a ``wm_`` twin of the final one (``watermark_overlay.mark_delivery``), both
 go to R2, and an upgrade re-points the library at the clean twins with no
 render (``cloud.videos.unmark_user_library``).
 """
@@ -18,6 +18,7 @@ import os
 
 import pytest
 
+import watermark_overlay
 import watermarked
 
 
@@ -55,7 +56,6 @@ class TestMarkDelivery:
     """The pipeline's last step on a free job: a wm_ copy next to the clean final."""
 
     def test_writes_the_copy_and_leaves_the_final_alone(self, tmp_path):
-        main = pytest.importorskip("main")
         final = tmp_path / "subtitled_1_t_clip_1.mp4"
         final.write_bytes(b"clean")
         calls = []
@@ -66,27 +66,25 @@ class TestMarkDelivery:
                 f.write(b"marked")
             return True
 
-        served = main.mark_delivery(str(final), marker=marker)
+        served = watermark_overlay.mark_delivery(str(final), marker=marker)
         assert os.path.basename(served) == "wm_subtitled_1_t_clip_1.mp4"
         assert calls == [("subtitled_1_t_clip_1.mp4", "wm_subtitled_1_t_clip_1.mp4")]
         assert final.read_bytes() == b"clean"
 
     def test_reuses_an_existing_copy(self, tmp_path):
-        main = pytest.importorskip("main")
         (tmp_path / "t_clip_1.mp4").write_bytes(b"clean")
         (tmp_path / "wm_t_clip_1.mp4").write_bytes(b"marked")
-        served = main.mark_delivery(str(tmp_path / "t_clip_1.mp4"),
-                                    marker=lambda *_: pytest.fail("re-encoded"))
+        served = watermark_overlay.mark_delivery(str(tmp_path / "t_clip_1.mp4"),
+                                                 marker=lambda *_: pytest.fail("re-encoded"))
         assert os.path.basename(served) == "wm_t_clip_1.mp4"
 
     def test_fails_open_under_the_marked_name(self, tmp_path):
         """A failed mark still serves the clip, and still under the wm_ name:
         the /videos guard refuses the clean deliverables of a free job, so a
         clean name here would be a clip the user cannot play."""
-        main = pytest.importorskip("main")
         (tmp_path / "t_clip_1.mp4").write_bytes(b"clean")
-        served = main.mark_delivery(str(tmp_path / "t_clip_1.mp4"),
-                                    marker=lambda *_: False)
+        served = watermark_overlay.mark_delivery(str(tmp_path / "t_clip_1.mp4"),
+                                                 marker=lambda *_: False)
         assert os.path.basename(served) == "wm_t_clip_1.mp4"
         assert (tmp_path / "wm_t_clip_1.mp4").read_bytes() == b"clean"
 
@@ -147,13 +145,11 @@ class TestMediaGuard:
         (tmp_path / "new").mkdir()
         (tmp_path / "new" / "t_clip_1.mp4").write_bytes(b"clean")
         watermarked.mark_job(str(tmp_path / "new"))
-        # main.py needs the ML stack; _deliver imports it lazily, so a stub
-        # module stands in for it here (CI installs none of it).
-        import sys
-        import types
-        monkeypatch.setitem(sys.modules, "main", types.SimpleNamespace(
-            mark_delivery=lambda path, marker=None: os.path.join(
-                os.path.dirname(path), "wm_" + os.path.basename(path))))
+        # A stand-in for the encode: _deliver must serve whatever copy
+        # mark_delivery made.
+        monkeypatch.setattr(watermark_overlay, "mark_delivery",
+                            lambda path, marker=None: os.path.join(
+                                os.path.dirname(path), "wm_" + os.path.basename(path)))
         assert asyncio.run(app._deliver(None, "new", "t_clip_1.mp4")) == "wm_t_clip_1.mp4"
 
     def test_marked_job_refuses_clean_clips_only(self, tmp_path, monkeypatch):

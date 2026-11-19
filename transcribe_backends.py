@@ -767,3 +767,34 @@ def transcribe_media(media_path):
                   f"falling back to whisper")
 
     return _transcribe_with_whisper(media_path)
+
+
+# The pipeline's transcription step (main.transcribe_video before it moved
+# here): one host slot, the backends above, and the model handed back after.
+def transcribe_video(video_path, slot_timeout=None):
+    """``slot_timeout``: seconds to wait for a host transcription slot before
+    giving up with TimeoutError (None waits for as long as it takes)."""
+    print("🎙️  Transcribing video...")
+    # At most ASR_HOST_SLOTS jobs transcribe on the GPU at once, host-wide.
+    # Inside the slot, the model's VRAM is handed back before the long render
+    # phase: a job process used to keep Parakeet (onnxruntime CUDA arena)
+    # resident until it exited. Measured in prod on 22-sep-2026, a job three
+    # clips into its render still held 5.9 GB of the 20 GB card; eight such
+    # jobs filled it and NVENC / TransNetV2 failed with CUDA OOM (30-60% of
+    # jobs failing per hour at peak). Nothing after this point transcribes.
+    with host_asr_slot(timeout=slot_timeout):
+        try:
+            transcript = transcribe_media(video_path)
+        finally:
+            try:
+                release_models()
+            except Exception as e:
+                print(f"⚠️ [ASR] could not release models ({type(e).__name__}: {e})")
+
+    print(f"   Detected language '{transcript['language']}', "
+          f"{len(transcript['segments'])} segments")
+    for segment in transcript['segments']:
+        # Print progress to keep user informed (and prevent timeouts feeling)
+        print(f"   [{segment['start']:.2f}s -> {segment['end']:.2f}s] {segment['text']}")
+
+    return transcript

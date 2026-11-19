@@ -6,6 +6,8 @@ import shutil
 import tempfile
 from typing import Any, Optional
 
+import watermark_overlay
+
 
 @dataclass(frozen=True)
 class ClipPlan:
@@ -75,7 +77,6 @@ class ClipFormat(ABC):
                facecam_box: Any = None) -> bool:
         """Analyze, compose, encode ``final_output_video`` and write layout sidecar."""
         import layout_ranges
-        import main as m
         import reframe_v2
 
         orig_w, orig_h, fps, duration = _probe_video(input_video)
@@ -84,7 +85,7 @@ class ClipFormat(ABC):
                                 facecam_box=facecam_box)
         plan = self.compose(analysis, orig_w, orig_h, out_w, out_h, duration)
 
-        logo = m.watermark_logo_path() if watermark else None
+        logo = watermark_overlay.watermark_logo_path() if watermark else None
         if logo and not os.path.exists(logo):
             logo = None
 

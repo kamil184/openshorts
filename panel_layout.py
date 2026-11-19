@@ -25,6 +25,7 @@ import os
 import numpy as np
 
 import split_layout
+import vision
 
 ENABLED = os.environ.get("PANEL_LAYOUT", "0") == "1"
 
@@ -106,7 +107,7 @@ def analyze_scene(frames, frame_w):
     """Median centres for a stable panel of 3-4 people, or None.
 
     ``frames`` is a list of per-frame candidate lists, as
-    ``main.detect_face_candidates`` returns them.
+    ``vision.detect_face_candidates`` returns them.
     """
     if not frames:
         return None
@@ -220,10 +221,7 @@ def detect_panel_scenes(video_path, scenes, strategies, samples=None):
     """
     if not ENABLED:
         return {}
-    # Below the gate on purpose: main pulls torch/mediapipe, and the disabled
-    # path (the default, and what CI exercises) must not pay that import.
     import cv2
-    import main as m
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -260,7 +258,7 @@ def detect_panel_scenes(video_path, scenes, strategies, samples=None):
                     continue
                 if frame.mean() < 16:
                     continue
-                sampled.append(m.detect_face_candidates(frame))
+                sampled.append(vision.detect_face_candidates(frame))
 
             if len(sampled) < max(4, n // 2):
                 continue

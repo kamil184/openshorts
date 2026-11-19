@@ -2,7 +2,7 @@
 
 Every file the pipeline and the clip editor write is clean. On the free plan the
 file that is *served* is `wm_<final>`, a copy of the final file with the mark
-burned in (`main.mark_delivery`, the last step after captions; in the job the copy
+burned in (`watermark_overlay.mark_delivery`, the last step after captions; in the job the copy
 is one more output of the ffmpeg that burns the captions, `auto_hook_clip(mark=)` /
 `auto_caption_clip(mark=)`, and `mark_delivery` only finds it made; the editor endpoints get it from `app._deliver`, decided from the
 caller's plan right now, not from the job's flag, which a restart loses). Both

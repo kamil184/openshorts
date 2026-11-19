@@ -29,6 +29,9 @@ import punch_in
 import screencast_layout
 import layout_ranges
 import split_layout
+import scene_analysis
+import vision
+import watermark_overlay
 from ffmpeg_utils import (video_encode_args, blurred_backdrop, escape_filter_value,
                           QUALITY_FAST, METADATA_SCRUB)
 
@@ -353,8 +356,6 @@ def _trajectory_loop(next_frame, sparse, n_frames, scenes_boundaries,
     frame (None at the end). Dense: one call per frame, the loop ends with the
     stream. Sparse: ``n_frames`` iterations and a call only where a detector
     runs (``next_frame(frame_number)``)."""
-    import main as m
-
     xs = []
     frame_number = 0
     current_scene_index = 0
@@ -384,25 +385,25 @@ def _trajectory_loop(next_frame, sparse, n_frames, scenes_boundaries,
             is_scene_start = (
                 current_scene_index < len(scenes_boundaries)
                 and frame_number == scenes_boundaries[current_scene_index][0])
-            cut = is_scene_start and m.SCENE_CUT_RESET
+            cut = is_scene_start and vision.SCENE_CUT_RESET
             if cut:
                 # New shot: forget the old subject and cut to the new one
                 # (see SmoothedCameraman.begin_scene).
                 tracker.reset()
                 cameraman.begin_scene()
 
-            if frame_number % m.DETECT_STRIDE == 0 or cut:
+            if frame_number % vision.DETECT_STRIDE == 0 or cut:
                 if sparse:
                     frame = next_frame(frame_number)
-                candidates = m.detect_face_candidates(frame)
+                candidates = vision.detect_face_candidates(frame)
                 for cand in candidates:
                     cand['box'] = [int(v * scale) for v in cand['box']]
                     cand['score'] = cand['box'][2] * cand['box'][3]
                 target_box = tracker.get_target(candidates, frame_number, orig_w)
                 if target_box:
                     cameraman.update_target(target_box)
-                elif frame_number % m.YOLO_FALLBACK_STRIDE == 0 or cut:
-                    person_box = m.detect_person_yolo(frame)
+                elif frame_number % vision.YOLO_FALLBACK_STRIDE == 0 or cut:
+                    person_box = vision.detect_person_yolo(frame)
                     if person_box:
                         cameraman.update_target([int(v * scale) for v in person_box])
 
@@ -426,12 +427,10 @@ def _sparse_trajectory(input_video, n_frames, on_gpu, small_w, small_h,
                        cameraman, tracker):
     """The trajectory decoding only the detector's frames (plus the last one,
     and anything past it, to prove the clip has exactly ``n_frames``)."""
-    import main as m
-
     wanted = _detection_frames(scenes_boundaries, scene_strategies, n_frames,
-                               m.DETECT_STRIDE, m.SCENE_CUT_RESET)
+                               vision.DETECT_STRIDE, vision.SCENE_CUT_RESET)
     piped = sorted(set(wanted) | {n_frames - 1})
-    expr = gpu_decode.any_of([select_expr(piped, m.DETECT_STRIDE), f"gte(n,{n_frames})"])
+    expr = gpu_decode.any_of([select_expr(piped, vision.DETECT_STRIDE), f"gte(n,{n_frames})"])
     chain = f"scale={small_w}:{small_h}"
     vf = (f"select='{expr}',{gpu_decode.DOWNLOAD},{chain}" if on_gpu
           else f"select='{expr}',{chain}")
@@ -589,19 +588,16 @@ def encode_scenes(input_video, specs, orig_w, orig_h, out_w, out_h, fps,
 
     The whole clip in one pass on the card when it can (gpu_render);
     otherwise one ffmpeg per scene and a concat, as always."""
-    if logo:
-        import main as m
-
     video_in = None
     if gpu_render.usable(input_video):
         gpu_out = os.path.join(workdir, "gpu.mp4")
         mark = None
         if logo:
             mark = {"path": logo,
-                    "x": int(out_w * m.WATERMARK_MARGIN_RATIO),
-                    "y": int(out_h * m.WATERMARK_Y_RATIO),
-                    "w": max(80, int(out_w * m.WATERMARK_WIDTH_RATIO)),
-                    "opacity": m.WATERMARK_OPACITY}
+                    "x": int(out_w * watermark_overlay.WATERMARK_MARGIN_RATIO),
+                    "y": int(out_h * watermark_overlay.WATERMARK_Y_RATIO),
+                    "w": max(80, int(out_w * watermark_overlay.WATERMARK_WIDTH_RATIO)),
+                    "opacity": watermark_overlay.WATERMARK_OPACITY}
         if gpu_render.render(input_video, specs, orig_w, orig_h, out_w, out_h,
                              fps, gpu_out, overlay=mark):
             video_in = ["-i", gpu_out]
@@ -613,7 +609,8 @@ def encode_scenes(input_video, specs, orig_w, orig_h, out_w, out_h, fps,
             extra, out_label = [], "[v]"
             if logo:
                 extra = ["-i", logo]
-                graph += ";" + m.watermark_filter(out_w, out_h, video="[v]", out="[vw]")
+                graph += ";" + watermark_overlay.watermark_filter(
+                    out_w, out_h, video="[v]", out="[vw]")
                 out_label = "[vw]"
             _run_segment(input_video, ss, dur, extra, graph, out_label, seg_path)
             segments.append(seg_path)
@@ -658,17 +655,16 @@ def render(input_video, final_output_video, aspect_ratio, content_ranges=None,
     the ones the tracker got right. Applied AFTER force_strategy: a per-scene
     hand position always beats the whole-clip choice for the scenes it names.
 
-    ``watermark`` overlays the free-plan mark (main.watermark_filter) in every
-    segment's own encode, instead of main.apply_watermark re-encoding the
-    finished clip once more.
+    ``watermark`` overlays the free-plan mark (watermark_overlay.watermark_filter)
+    in every segment's own encode, instead of watermark_overlay.apply_watermark
+    re-encoding the finished clip once more.
     """
-    import main as m
     content_ranges = content_ranges or []
 
     print("   🚀 Reframe engine v2 (ffmpeg-native render)")
-    scenes, fps = m.detect_scenes(input_video)
+    scenes, fps = scene_analysis.detect_scenes(input_video)
     fps = float(fps)  # PySceneDetect can hand back a Fraction
-    orig_w, orig_h = m.get_video_resolution(input_video)
+    orig_w, orig_h = scene_analysis.get_video_resolution(input_video)
 
     out_w, out_h = delivery_size(orig_w, orig_h, aspect_ratio)
 
@@ -697,7 +693,7 @@ def render(input_video, final_output_video, aspect_ratio, content_ranges=None,
         print(f"   ↕️  Source is already {orig_w}x{orig_h} vertical — "
               f"passing it through, no reframe")
     else:
-        strategies = m.analyze_scenes_strategy(input_video, scenes)
+        strategies = scene_analysis.analyze_scenes_strategy(input_video, scenes)
         if not content_ranges and screencast_layout.ENABLED:
             content_ranges = screen_ranges(input_video, scenes, fps, strategies)
 
@@ -811,8 +807,8 @@ def render(input_video, final_output_video, aspect_ratio, content_ranges=None,
     # derives crop_width/crop_height from video_width/video_height and never
     # reads the output pair. So out_w/out_h being the (possibly upscaled)
     # delivery size doesn't move the camera; only the final scale= uses it.
-    cameraman = m.SmoothedCameraman(out_w, out_h, orig_w, orig_h, aspect_ratio=aspect_ratio)
-    tracker = m.SpeakerTracker(cooldown_frames=30)
+    cameraman = vision.SmoothedCameraman(out_w, out_h, orig_w, orig_h, aspect_ratio=aspect_ratio)
+    tracker = vision.SpeakerTracker(cooldown_frames=30)
 
     xs = _analyze_trajectory(input_video, scene_boundaries, strategies, fps,
                              orig_w, orig_h, cameraman, tracker)
@@ -851,7 +847,7 @@ def render(input_video, final_output_video, aspect_ratio, content_ranges=None,
     ranges = scene_frame_ranges(scene_boundaries, strategies, len(xs))
     if not ranges:
         raise RuntimeError("no usable scene ranges")
-    logo = m.watermark_logo_path() if watermark else None
+    logo = watermark_overlay.watermark_logo_path() if watermark else None
     if logo and not os.path.exists(logo):
         print(f"   ⚠️ Watermark asset missing ({logo}); clip kept unmarked.")
         logo = None
